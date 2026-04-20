@@ -29,6 +29,7 @@ export type AssistantStructuredOutput = {
 
 export class AssistantClient {
   private readonly client = new OpenAI({ apiKey: Env.openAiApiKey });
+  private readonly runConflictBackoffMs = [3000, 6000, 9000];
 
   public async runAssistant(payload: {
     assistantId: string;
@@ -40,15 +41,12 @@ export class AssistantClient {
     const threadId = payload.threadId ?? (await this.client.beta.threads.create()).id;
     const toolResults: Array<Record<string, unknown>> = [];
 
-    await this.client.beta.threads.messages.create(threadId, {
-      role: "user",
-      content: `${payload.prompt}\n\nCONTEXTO_JSON:\n${JSON.stringify(payload.contextJson)}`
-    });
+    await this.createUserMessageWithRetry(
+      threadId,
+      `${payload.prompt}\n\nCONTEXTO_JSON:\n${JSON.stringify(payload.contextJson)}`
+    );
 
-    const initialRun = await this.client.beta.threads.runs.create(threadId, {
-      assistant_id: payload.assistantId,
-      response_format: { type: "json_object" }
-    });
+    const initialRun = await this.createRunWithRetry(threadId, payload.assistantId);
     const run = await this.pollRunUntilTerminal(threadId, initialRun.id, payload.onToolCall, toolResults);
 
     if (run.status !== "completed") {
@@ -176,5 +174,73 @@ export class AssistantClient {
     }
 
     throw new Error("No se encontró respuesta de texto del asistente");
+  }
+
+  private async createUserMessageWithRetry(threadId: string, content: string): Promise<void> {
+    for (let attempt = 0; attempt <= this.runConflictBackoffMs.length; attempt += 1) {
+      try {
+        await this.client.beta.threads.messages.create(threadId, {
+          role: "user",
+          content
+        });
+        return;
+      } catch (error) {
+        const isConflict = this.isActiveRunConflict(error);
+        if (!isConflict || attempt === this.runConflictBackoffMs.length) {
+          throw error;
+        }
+
+        const delayMs = this.runConflictBackoffMs[attempt];
+        logger.warn(
+          {
+            threadId,
+            delayMs,
+            attempt: attempt + 1
+          },
+          "Thread ocupado por run activo al crear mensaje. Reintentando..."
+        );
+        await this.sleep(delayMs);
+      }
+    }
+  }
+
+  private async createRunWithRetry(threadId: string, assistantId: string): Promise<OpenAI.Beta.Threads.Runs.Run> {
+    for (let attempt = 0; attempt <= this.runConflictBackoffMs.length; attempt += 1) {
+      try {
+        return await this.client.beta.threads.runs.create(threadId, {
+          assistant_id: assistantId,
+          response_format: { type: "json_object" }
+        });
+      } catch (error) {
+        const isConflict = this.isActiveRunConflict(error);
+        if (!isConflict || attempt === this.runConflictBackoffMs.length) {
+          throw error;
+        }
+
+        const delayMs = this.runConflictBackoffMs[attempt];
+        logger.warn(
+          {
+            threadId,
+            delayMs,
+            attempt: attempt + 1
+          },
+          "Thread ocupado por run activo al iniciar run. Reintentando..."
+        );
+        await this.sleep(delayMs);
+      }
+    }
+
+    throw new Error("No se pudo iniciar run del assistant");
+  }
+
+  private isActiveRunConflict(error: unknown): boolean {
+    if (!error || typeof error !== "object") {
+      return false;
+    }
+
+    const message = "message" in error ? String((error as { message?: unknown }).message ?? "") : "";
+    const status = "status" in error ? Number((error as { status?: unknown }).status ?? 0) : 0;
+
+    return status === 400 && message.includes("while a run") && message.includes("is active");
   }
 }

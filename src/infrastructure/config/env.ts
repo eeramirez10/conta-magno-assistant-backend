@@ -3,6 +3,11 @@ import dotenv from "dotenv";
 dotenv.config();
 
 export class Env {
+  private static toInt(rawValue: string | undefined, fallback: number): number {
+    const parsed = Number(rawValue);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
   public static readonly port: number = Number(process.env.PORT || 4000);
   public static readonly databaseUrl: string = process.env.DATABASE_URL || "";
   public static readonly openAiApiKey: string = process.env.OPENAI_API_KEY || "";
@@ -23,4 +28,5 @@ export class Env {
   public static readonly smtpUser: string = process.env.SMTP_USER || "";
   public static readonly smtpPass: string = process.env.SMTP_PASS || "";
   public static readonly smtpFrom: string = process.env.SMTP_FROM || "Conta Magno <no-reply@contamagno.com>";
+  public static readonly assistantQueueWindowMs: number = Math.max(0, Env.toInt(process.env.ASSISTANT_QUEUE_WINDOW_MS, 8000));
 }

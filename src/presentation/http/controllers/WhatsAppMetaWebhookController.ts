@@ -8,7 +8,7 @@ export class WhatsAppMetaWebhookController {
   constructor(
     private readonly provider: IWhatsAppProvider,
     private readonly orchestratorService: AssistantOrchestratorService
-  ) {}
+  ) { }
 
   public verify(req: Request, res: Response): void {
     const mode = req.query["hub.mode"];
@@ -25,6 +25,20 @@ export class WhatsAppMetaWebhookController {
 
   public async handle(req: Request, res: Response): Promise<void> {
     const [error, dto] = MetaIncomingMessageRequestDTO.validate(req.body);
+
+    const value = (req.body as any)?.entry?.[0]?.changes?.[0]?.value;
+    const contact = value?.contacts?.[0];
+    const message = value?.messages?.[0];
+
+    if (message) {
+      console.log({
+        contactName: contact?.profile?.name ?? null,
+        contactWaId: contact?.wa_id ?? message?.from ?? null,
+        messageText: message?.text?.body ?? "",
+        messageType: message?.type ?? null
+      });
+    }
+
     if (error || !dto) {
       res.status(400).json({ ok: false, message: error ?? "Payload inválido" });
       return;
