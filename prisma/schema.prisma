@@ -1,0 +1,173 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ConversationStatus {
+  OPEN
+  CLOSED
+  ARCHIVED
+}
+
+enum ConversationStage {
+  GREETING
+  QUALIFYING
+  INFORMATION
+  PLAN_RECOMMENDATION
+  SCHEDULING
+  PENDING_HUMAN
+  COMPLETED
+}
+
+enum InquiryStatus {
+  NEW
+  QUALIFIED
+  PENDING_FOLLOWUP
+  APPOINTMENT_TENTATIVE
+  APPOINTMENT_CONFIRMED
+  CLOSED
+}
+
+enum ContribuyenteType {
+  PF_RESICO
+  PF_ACTIVIDAD_EMPRESARIAL_Y_PROFESIONAL
+  PF_SUELDOS_Y_SALARIOS
+  PF_ARRENDAMIENTO
+  PF_PLATAFORMAS_TECNOLOGICAS
+  PF_OTROS_INGRESOS
+  PM_REGIMEN_GENERAL
+  PM_RESICO
+  PM_SIN_FINES_DE_LUCRO
+  NO_LO_SE_AUN
+  NO_INSCRITO_EN_HACIENDA
+}
+
+enum NotificationEventType {
+  LEAD_CREATED
+  LEAD_UPDATED
+  APPOINTMENT_REQUESTED
+  APPOINTMENT_CONFIRMED
+}
+
+enum AppointmentStatus {
+  TENTATIVE
+  CONFIRMED
+  RESCHEDULED
+  CANCELLED
+}
+
+model Contact {
+  id             String         @id @default(cuid())
+  waId           String         @unique
+  fullName       String
+  phoneE164      String
+  email          String?
+  timezone       String         @default("America/Mexico_City")
+  consentPrivacy Boolean        @default(false)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  conversations  Conversation[]
+  inquiries      Inquiry[]
+}
+
+model Conversation {
+  id                String             @id @default(cuid())
+  contactId         String
+  provider          String
+  assistantThreadId String?            @unique
+  status            ConversationStatus @default(OPEN)
+  stage             ConversationStage  @default(GREETING)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  contact           Contact            @relation(fields: [contactId], references: [id])
+  messages          Message[]
+  inquiries         Inquiry[]
+
+  @@index([contactId, status])
+}
+
+model Message {
+  id                String       @id @default(cuid())
+  conversationId    String
+  direction         String
+  providerMessageId String?
+  text              String
+  rawPayload        Json
+  createdAt         DateTime     @default(now())
+  conversation      Conversation @relation(fields: [conversationId], references: [id])
+
+  @@unique([providerMessageId])
+  @@index([conversationId, createdAt])
+}
+
+model Inquiry {
+  id               String              @id @default(cuid())
+  folio            String              @unique
+  contactId        String
+  conversationId   String
+  status           InquiryStatus       @default(NEW)
+  clientType       ContribuyenteType?
+  specialtyProfile String?
+  mainNeed         String?
+  urgency          String?
+  budgetRange      String?
+  recommendedPlan  String?
+  notes            String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  contact          Contact             @relation(fields: [contactId], references: [id])
+  conversation     Conversation        @relation(fields: [conversationId], references: [id])
+  notifications    NotificationEvent[]
+  appointments     Appointment[]
+
+  @@index([contactId, status])
+}
+
+model NotificationEvent {
+  id        String                @id @default(cuid())
+  inquiryId String
+  eventType NotificationEventType
+  channel   String
+  payload   Json
+  sentAt    DateTime?
+  createdAt DateTime              @default(now())
+  inquiry   Inquiry               @relation(fields: [inquiryId], references: [id])
+
+  @@index([inquiryId, eventType])
+}
+
+model AvailabilitySlot {
+  id           String        @id @default(cuid())
+  date         String
+  startTime    String
+  endTime      String
+  timezone     String        @default("America/Mexico_City")
+  capacity     Int           @default(1)
+  bookedCount  Int           @default(0)
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  appointments Appointment[]
+
+  @@unique([date, startTime, endTime, timezone])
+  @@index([date, isActive])
+}
+
+model Appointment {
+  id          String            @id @default(cuid())
+  inquiryId   String
+  slotId      String
+  status      AppointmentStatus @default(TENTATIVE)
+  meetingLink String?
+  createdBy   String            @default("ASSISTANT")
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  inquiry     Inquiry           @relation(fields: [inquiryId], references: [id])
+  slot        AvailabilitySlot  @relation(fields: [slotId], references: [id])
+
+  @@index([inquiryId, status])
+}
