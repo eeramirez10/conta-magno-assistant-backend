@@ -1,0 +1,31 @@
+### Health
+GET http://localhost:4000/health
+
+### Meta verify webhook
+GET http://localhost:4000/webhooks/whatsapp/meta?hub.mode=subscribe&hub.verify_token=CHANGE_ME&hub.challenge=12345
+
+### Meta incoming message
+POST http://localhost:4000/webhooks/whatsapp/meta
+Content-Type: application/json
+
+{
+  "entry": [
+    {
+      "changes": [
+        {
+          "value": {
+            "messages": [
+              {
+                "id": "wamid.test.001",
+                "from": "5215512345678",
+                "text": {
+                  "body": "Hola, soy persona física y quiero agendar asesoría"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

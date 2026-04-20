@@ -1,0 +1,5 @@
+### Twilio incoming message
+POST http://localhost:4000/webhooks/whatsapp/twilio
+Content-Type: application/x-www-form-urlencoded
+
+From=whatsapp:+5215512345678&Body=Hola%20quiero%20apoyo%20fiscal&MessageSid=SM_TEST_001

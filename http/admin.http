@@ -1,0 +1,27 @@
+### List inquiries
+GET http://localhost:4000/api/inquiries
+
+### Inquiry detail
+GET http://localhost:4000/api/inquiries/INQUIRY_ID
+
+### Update inquiry status
+POST http://localhost:4000/api/inquiries/INQUIRY_ID/status
+Content-Type: application/json
+
+{
+  "status": "QUALIFIED"
+}
+
+### Update inquiry notes
+POST http://localhost:4000/api/inquiries/INQUIRY_ID/notes
+Content-Type: application/json
+
+{
+  "notes": "Cliente con urgencia alta y necesidad en estrategia fiscal"
+}
+
+### List conversations
+GET http://localhost:4000/api/conversations
+
+### Conversation detail
+GET http://localhost:4000/api/conversations/CONVERSATION_ID

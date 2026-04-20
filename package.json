@@ -1,0 +1,45 @@
+{
+  "name": "conta-magno-assistant-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "npm run env:use:dev",
+    "dev": "tsx watch src/presentation/http/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "prestart": "npm run env:use:prod",
+    "start": "node dist/presentation/http/server.js",
+    "env:use:dev": "cp .env.development .env",
+    "env:use:prod": "cp .env.production .env",
+    "assistant:bootstrap": "tsx src/scripts/bootstrapAssistant.ts",
+    "preprisma:migrate": "npm run env:use:dev",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "preprisma:deploy": "npm run env:use:prod",
+    "prisma:deploy": "prisma migrate deploy",
+    "predb:clear:dev": "npm run env:use:dev",
+    "db:clear:dev": "tsx src/scripts/clearDevData.ts",
+    "preseed": "npm run env:use:dev",
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.4.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "nodemailer": "^6.10.1",
+    "openai": "^4.86.2",
+    "pino": "^9.6.0",
+    "pino-http": "^10.4.0",
+    "twilio": "^5.5.3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/nodemailer": "^6.4.15",
+    "@types/node": "^22.13.4",
+    "prisma": "^6.4.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.2"
+  }
+}
