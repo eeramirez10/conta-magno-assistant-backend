@@ -1,0 +1,13 @@
+### Test owner lead template
+POST http://localhost:4000/api/admin/notifications/test-owner-template
+Content-Type: application/json
+
+{
+  "toWaId": "525541142762",
+  "folio": "FOL-20260608-0001",
+  "fullName": "Juan Perez",
+  "leadPhoneE164": "5215541142762",
+  "email": "juan.perez@gmail.com",
+  "mainNeed": "Regularizacion ante SAT y declaraciones atrasadas",
+  "recommendedPlan": "Intermedio"
+}

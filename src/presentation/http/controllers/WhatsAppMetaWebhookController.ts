@@ -3,7 +3,6 @@ import { MetaIncomingMessageRequestDTO } from "../../../application/dtos/request
 import { AssistantOrchestratorService } from "../../../application/services/AssistantOrchestratorService.js";
 import { IWhatsAppProvider } from "../../../infrastructure/adapters/messaging/IWhatsAppProvider.js";
 import { Env } from "../../../infrastructure/config/env.js";
-
 export class WhatsAppMetaWebhookController {
   constructor(
     private readonly provider: IWhatsAppProvider,
@@ -29,6 +28,7 @@ export class WhatsAppMetaWebhookController {
     const value = (req.body as any)?.entry?.[0]?.changes?.[0]?.value;
     const contact = value?.contacts?.[0];
     const message = value?.messages?.[0];
+    const status = value?.statuses?.[0];
 
     if (message) {
       console.log({
@@ -37,6 +37,21 @@ export class WhatsAppMetaWebhookController {
         messageText: message?.text?.body ?? "",
         messageType: message?.type ?? null
       });
+    }
+
+    if (status) {
+      // console.log({
+      //   statusMessageId: status?.id ?? null,
+      //   statusRecipientId: status?.recipient_id ?? null,
+      //   statusValue: status?.status ?? null,
+      //   statusTimestamp: status?.timestamp ?? null,
+      //   statusConversationId: status?.conversation?.id ?? null,
+      //   statusConversationOrigin: status?.conversation?.origin?.type ?? null,
+      //   statusPricingCategory: status?.pricing?.category ?? null,
+      //   statusErrorCode: status?.errors?.[0]?.code ?? null,
+      //   statusErrorTitle: status?.errors?.[0]?.title ?? null,
+      //   statusErrorMessage: status?.errors?.[0]?.message ?? null
+      // });
     }
 
     if (error || !dto) {
@@ -49,7 +64,6 @@ export class WhatsAppMetaWebhookController {
       res.status(200).json({ ok: true, ignored: true });
       return;
     }
-
     const result = await this.orchestratorService.processIncoming(this.provider, incoming);
     res.status(200).json(result);
   }

@@ -29,6 +29,8 @@ type ConversationQueueState = {
 
 export class AssistantOrchestratorService {
   private static readonly queueByConversationId = new Map<string, ConversationQueueState>();
+  private static readonly unsupportedNonTextReply =
+    "Por el momento solo puedo recibir mensajes de texto. ¿Podrías enviarme tu mensaje por escrito, por favor?";
 
   private static readonly contribuyenteTypeLabelByCode: Record<string, string> = {
     PF_RESICO: "Persona Física - RESICO",
@@ -51,7 +53,7 @@ export class AssistantOrchestratorService {
     private readonly inquiryService: InquiryApplicationService,
     private readonly notificationService: NotificationApplicationService,
     private readonly toolRouterService: AssistantToolRouterService
-  ) {}
+  ) { }
 
   public async processIncoming(provider: IWhatsAppProvider, incoming: UnifiedIncomingMessage): Promise<{ ok: boolean; replyText: string; folio: string }> {
     if (!Env.openAiAssistantId) {
@@ -68,8 +70,13 @@ export class AssistantOrchestratorService {
       throw new Error(upsertContactError ?? "No se pudo preparar contacto");
     }
 
-    let contact = await this.contactService.upsert(upsertContactDto);
+    const contact = await this.contactService.upsert(upsertContactDto);
     const conversation = await this.conversationService.createOrGetActive(contact.id, incoming.provider);
+
+    if (this.isUnsupportedIncomingMessage(incoming)) {
+      return this.handleUnsupportedIncomingMessage(provider, conversation.id, incoming);
+    }
+
     const queue = this.getQueueState(conversation.id);
 
     queue.pending.push({ provider, incoming });
@@ -169,7 +176,7 @@ export class AssistantOrchestratorService {
     const contextJson = {
       business: "Conta Magno",
       timezone: "America/Mexico_City",
-      goals: ["calificar lead", "recomendar paquete", "agendar video llamada"],
+      goals: ["calificar lead", "recomendar paquete", "capturar datos para seguimiento humano"],
       contact,
       conversation: {
         id: conversation.id,
@@ -234,9 +241,32 @@ export class AssistantOrchestratorService {
       recommendedPlan: extracted.recommendedPlan
     });
 
+    let latestInquiry = inquiry;
+
     if (!updateFieldsErr && updateFieldsDto) {
-      await this.inquiryService.updateFields(updateFieldsDto);
+      latestInquiry = await this.inquiryService.updateFields(updateFieldsDto);
     }
+
+    const hasOwnerLeadTemplateData =
+      Boolean(contact.fullName?.trim()) &&
+      Boolean(contact.phoneE164?.trim()) &&
+      Boolean(contact.email?.trim()) &&
+      Boolean(latestInquiry.mainNeed?.trim()) &&
+      Boolean(latestInquiry.recommendedPlan?.trim());
+
+    if (hasOwnerLeadTemplateData) {
+      await this.notificationService.notifyOwnerLeadTemplate({
+        inquiryId: latestInquiry.id,
+        folio: latestInquiry.folio,
+        fullName: contact.fullName.trim(),
+        phoneE164: contact.phoneE164.trim(),
+        email: (contact.email ?? "").trim(),
+        mainNeed: latestInquiry.mainNeed!.trim(),
+        recommendedPlan: latestInquiry.recommendedPlan!.trim()
+      });
+    }
+
+
 
     const toolResults = [...assistantResult.toolResults];
 
@@ -333,6 +363,54 @@ export class AssistantOrchestratorService {
     }
 
     return text;
+  }
+
+  private isUnsupportedIncomingMessage(incoming: UnifiedIncomingMessage): boolean {
+    return Boolean(incoming.messageType && incoming.messageType !== "text");
+  }
+
+  private async handleUnsupportedIncomingMessage(
+    provider: IWhatsAppProvider,
+    conversationId: string,
+    incoming: UnifiedIncomingMessage
+  ): Promise<{ ok: boolean; replyText: string; folio: string }> {
+    if (incoming.providerMessageId) {
+      const existing = await this.conversationService.findMessageByProviderMessageId(incoming.providerMessageId);
+      if (existing) {
+        return { ok: true, replyText: "duplicate_ignored", folio: "DUPLICATE" };
+      }
+    }
+
+    await this.conversationService.addInboundMessage({
+      conversationId,
+      providerMessageId: incoming.providerMessageId,
+      text: this.buildUnsupportedInboundText(incoming.messageType),
+      rawPayload: incoming.rawPayload
+    });
+
+    const replyText = AssistantOrchestratorService.unsupportedNonTextReply;
+    const sent = await provider.sendTextMessage(incoming.waId, replyText);
+
+    await this.conversationService.addOutboundMessage({
+      conversationId,
+      providerMessageId: sent.providerMessageId,
+      text: replyText,
+      rawPayload: {
+        provider: incoming.provider,
+        unsupportedMessageType: incoming.messageType ?? null
+      }
+    });
+
+    return {
+      ok: true,
+      replyText,
+      folio: "UNSUPPORTED_MEDIA"
+    };
+  }
+
+  private buildUnsupportedInboundText(messageType?: string): string {
+    const label = messageType?.trim().toLowerCase() || "unsupported";
+    return `[${label} message]`;
   }
 
   private inferClientTypeFromMessage(text: string): string | undefined {

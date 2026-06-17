@@ -29,3 +29,44 @@ Content-Type: application/json
     }
   ]
 }
+
+### Meta outgoing status
+POST http://localhost:4000/webhooks/whatsapp/meta
+Content-Type: application/json
+
+{
+  "entry": [
+    {
+      "changes": [
+        {
+          "value": {
+            "statuses": [
+              {
+                "id": "wamid.test.001",
+                "recipient_id": "525551234567",
+                "status": "failed",
+                "timestamp": "1718000000",
+                "conversation": {
+                  "id": "conversation-test-001",
+                  "origin": {
+                    "type": "marketing"
+                  }
+                },
+                "pricing": {
+                  "category": "marketing"
+                },
+                "errors": [
+                  {
+                    "code": 131026,
+                    "title": "Message undeliverable",
+                    "message": "Ejemplo de error enviado por Meta"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

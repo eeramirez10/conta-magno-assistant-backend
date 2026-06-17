@@ -27,12 +27,14 @@ import { PrismaNotificationRepository } from "../../infrastructure/repositories/
 import { PrismaSlotRepository } from "../../infrastructure/repositories/PrismaSlotRepository.js";
 import { ConversationAdminController } from "./controllers/ConversationAdminController.js";
 import { InquiryAdminController } from "./controllers/InquiryAdminController.js";
+import { NotificationAdminController } from "./controllers/NotificationAdminController.js";
 import { WhatsAppMetaWebhookController } from "./controllers/WhatsAppMetaWebhookController.js";
 import { WhatsAppTwilioWebhookController } from "./controllers/WhatsAppTwilioWebhookController.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
 import { buildAdminRouter } from "./routes/admin.routes.js";
 import { buildWhatsAppMetaRouter } from "./routes/whatsappMeta.routes.js";
 import { buildWhatsAppTwilioRouter } from "./routes/whatsappTwilio.routes.js";
+
 
 const app = express();
 
@@ -66,7 +68,8 @@ const inquiryService = new InquiryApplicationService(
 const notificationService = new NotificationApplicationService(
   notificationRepository,
   new EmailClient(),
-  new TwilioWhatsAppClient()
+  new TwilioWhatsAppClient(),
+  new MetaWhatsAppClient()
 );
 
 const toolRouterService = new AssistantToolRouterService(
@@ -95,10 +98,14 @@ const twilioController = new WhatsAppTwilioWebhookController(
 );
 const inquiryController = new InquiryAdminController(inquiryService);
 const conversationController = new ConversationAdminController(conversationService, contactService);
+const notificationController = new NotificationAdminController(
+  new MetaWhatsAppClient(),
+  new ContactDomainService()
+);
 
 app.use(buildWhatsAppMetaRouter(metaController));
 app.use(buildWhatsAppTwilioRouter(twilioController));
-app.use(buildAdminRouter(inquiryController, conversationController));
+app.use(buildAdminRouter(inquiryController, conversationController, notificationController));
 
 app.get("/health", (_req: Request, res: Response) => {
   res.status(200).json({

@@ -16,7 +16,8 @@ export class MetaWhatsAppProviderAdapter implements IWhatsAppProvider {
       waId: message.from,
       providerMessageId: message.id ?? null,
       text: message.text?.body ?? "",
-      rawPayload: payload
+      rawPayload: payload,
+      messageType: message.type ?? "unknown"
     };
   }
 

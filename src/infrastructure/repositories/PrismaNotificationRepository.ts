@@ -1,7 +1,12 @@
+import Prisma from "@prisma/client";
 import { NotificationEvent } from "../../domain/entities/NotificationEvent.js";
-import { NotificationEventType } from "../../domain/enums/NotificationEventType.js";
+
 import { INotificationRepository } from "../../domain/repositories/INotificationRepository.js";
 import { prisma } from "../database/prisma.js";
+import { NotificationEventType } from "../../domain/enums/NotificationEventType.js";
+import { InputJsonValue } from "@prisma/client/runtime/library";
+
+
 
 function mapEvent(row: {
   id: string;
@@ -24,6 +29,20 @@ function mapEvent(row: {
 }
 
 export class PrismaNotificationRepository implements INotificationRepository {
+
+
+  public async hasEvent(payload: { inquiryid: string; eventType: NotificationEventType; channel: "EMAIL" | "WHATSAPP"; }): Promise<boolean> {
+   const row = await prisma.notificationEvent.findFirst({
+    where:{
+      inquiryId:payload.inquiryid,
+      eventType:payload.eventType as unknown as Prisma.NotificationEventType,
+      channel: payload.channel
+    },
+    select:{ id: true}
+   })
+
+   return Boolean(row)
+  }
   public async create(payload: {
     inquiryId: string;
     eventType: NotificationEventType;
@@ -33,9 +52,9 @@ export class PrismaNotificationRepository implements INotificationRepository {
     const row = await prisma.notificationEvent.create({
       data: {
         inquiryId: payload.inquiryId,
-        eventType: payload.eventType,
+        eventType: payload.eventType as unknown as Prisma.NotificationEventType,
         channel: payload.channel,
-        payload: payload.payload
+        payload: payload.payload as unknown as Prisma.Prisma.NullTypes.JsonNull | InputJsonValue
       }
     });
 

@@ -19,9 +19,9 @@ export class Env {
   public static readonly metaWebhookVerifyToken: string = process.env.META_WEBHOOK_VERIFY_TOKEN || "";
   public static readonly twilioAccountSid: string = process.env.TWILIO_ACCOUNT_SID || "";
   public static readonly twilioAuthToken: string = process.env.TWILIO_AUTH_TOKEN || "";
-  public static readonly twilioWhatsAppFrom: string = process.env.TWILIO_WHATSAPP_FROM || "";
-  public static readonly adminWhatsAppTo: string = process.env.ADMIN_WHATSAPP_TO || "";
-  public static readonly adminEmailTo: string = process.env.ADMIN_EMAIL_TO || "";
+
+
+  
   public static readonly smtpHost: string = process.env.SMTP_HOST || "";
   public static readonly smtpPort: number = Number(process.env.SMTP_PORT || 587);
   public static readonly smtpSecure: boolean = (process.env.SMTP_SECURE || "false") === "true";
@@ -29,4 +29,13 @@ export class Env {
   public static readonly smtpPass: string = process.env.SMTP_PASS || "";
   public static readonly smtpFrom: string = process.env.SMTP_FROM || "Conta Magno <no-reply@contamagno.com>";
   public static readonly assistantQueueWindowMs: number = Math.max(0, Env.toInt(process.env.ASSISTANT_QUEUE_WINDOW_MS, 8000));
+
+
+
+
+    public static readonly twilioWhatsAppFrom: string = process.env.TWILIO_WHATSAPP_FROM || "";
+    public static readonly adminWhatsAppTo: string = process.env.ADMIN_WHATSAPP_TO || "";
+    public static readonly metaOwnerLeadTemplateName: string = process.env.META_OWNER_LEAD_TEMPLATE_NAME || "";
+    public static readonly metaOwnerLeadTemplateLang: string = process.env.META_OWNER_LEAD_TEMPLATE_LANG || "es_MX";
+    public static readonly adminEmailTo: string = process.env.ADMIN_EMAIL_TO || "";
 }

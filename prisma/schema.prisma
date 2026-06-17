@@ -51,6 +51,7 @@ enum NotificationEventType {
   LEAD_UPDATED
   APPOINTMENT_REQUESTED
   APPOINTMENT_CONFIRMED
+  OWNER_LEAD_TEMPLATE_SENT
 }
 
 enum AppointmentStatus {

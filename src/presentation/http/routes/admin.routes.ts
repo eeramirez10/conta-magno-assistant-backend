@@ -1,10 +1,12 @@
 import { Router } from "express";
 import { ConversationAdminController } from "../controllers/ConversationAdminController.js";
 import { InquiryAdminController } from "../controllers/InquiryAdminController.js";
+import { NotificationAdminController } from "../controllers/NotificationAdminController.js";
 
 export function buildAdminRouter(
   inquiryController: InquiryAdminController,
-  conversationController: ConversationAdminController
+  conversationController: ConversationAdminController,
+  notificationController: NotificationAdminController
 ): Router {
   const router = Router();
 
@@ -15,6 +17,9 @@ export function buildAdminRouter(
 
   router.get("/api/conversations", (req, res, next) => conversationController.list(req, res).catch(next));
   router.get("/api/conversations/:id", (req, res, next) => conversationController.detail(req, res).catch(next));
+  router.post("/api/admin/notifications/test-owner-template", (req, res, next) =>
+    notificationController.sendOwnerLeadTemplateTest(req, res).catch(next)
+  );
 
   return router;
 }

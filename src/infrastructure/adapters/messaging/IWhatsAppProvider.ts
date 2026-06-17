@@ -4,6 +4,7 @@ export type UnifiedIncomingMessage = {
   providerMessageId: string | null;
   text: string;
   rawPayload: unknown;
+  messageType?: string;
 };
 
 export interface IWhatsAppProvider {

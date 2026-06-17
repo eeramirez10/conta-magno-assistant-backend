@@ -139,37 +139,5 @@ export const contaMagnoAssistantFunctions: AssistantFunctionDefinition[] = [
         additionalProperties: false
       }
     }
-  },
-  {
-    type: "function",
-    function: {
-      name: "listAvailableSlots",
-      description: "Lista horarios disponibles para cita por video llamada.",
-      parameters: {
-        type: "object",
-        properties: {
-          fromDate: { type: "string", description: "Formato YYYY-MM-DD" },
-          limit: { type: "integer", minimum: 1, maximum: 20 }
-        },
-        required: ["fromDate"],
-        additionalProperties: false
-      }
-    }
-  },
-  {
-    type: "function",
-    function: {
-      name: "createTentativeAppointment",
-      description: "Reserva una cita tentativa en un slot seleccionado por el lead.",
-      parameters: {
-        type: "object",
-        properties: {
-          inquiryId: { type: "string" },
-          slotId: { type: "string" }
-        },
-        required: ["inquiryId", "slotId"],
-        additionalProperties: false
-      }
-    }
   }
 ];
