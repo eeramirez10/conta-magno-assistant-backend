@@ -5,13 +5,17 @@ import { ConversationDomainService } from "../../domain/services/ConversationDom
 import { IConversationRepository } from "../../domain/repositories/IConversationRepository.js";
 import { IMessageRepository } from "../../domain/repositories/IMessageRepository.js";
 import { UpdateConversationStageRequestDTO } from "../dtos/request/tools/UpdateConversationStageRequestDTO.js";
+import { IContactRepository } from "../../domain/repositories/IContactRepository.js";
+import { MetaWhatsAppClient } from '../../infrastructure/integrations/whatsapp/meta/MetaWhatsAppClient.js';
 
 export class ConversationApplicationService {
   constructor(
     private readonly conversationRepository: IConversationRepository,
     private readonly messageRepository: IMessageRepository,
+    private readonly contactRepository: IContactRepository,
+    private readonly metaClient: MetaWhatsAppClient,
     private readonly domainService: ConversationDomainService
-  ) {}
+  ) { }
 
   public async createOrGetActive(contactId: string, provider: string): Promise<Conversation> {
     const active = await this.conversationRepository.getActiveByContactId(contactId);
@@ -87,5 +91,58 @@ export class ConversationApplicationService {
 
   public stageFromString(value: string): ConversationStage | null {
     return (Object.values(ConversationStage) as string[]).includes(value) ? (value as ConversationStage) : null;
+  }
+
+  public async takeHumanControl(conversationId: string): Promise<Conversation> {
+    const conversation = await this.conversationRepository.findById(conversationId);
+
+    if (!conversation) {
+      throw new Error('Conversation not found')
+    }
+
+    return this.conversationRepository
+      .updateStage(conversationId, ConversationStage.PENDING_HUMAN);
+  }
+
+  public async releaseHumanControl(conversationId: string): Promise<Conversation> {
+    const conversation = await this.conversationRepository.findById(conversationId);
+
+    if (!conversation) {
+      throw new Error('Conversation not found')
+    }
+
+    return this.conversationRepository
+      .updateStage(conversationId, ConversationStage.QUALIFYING);
+  }
+
+  public async sendHumanMessage(payload: { conversationId: string, text: string }): Promise<Message> {
+
+    const conversation = await this.conversationRepository.findById(payload.conversationId);
+
+    if (!conversation) throw new Error(`Conversation not found with id ${payload.conversationId}`)
+
+    if (conversation.stage !== ConversationStage.PENDING_HUMAN) throw new Error("You must take control first");
+
+    const contact = await this.contactRepository.findById(conversation.contactId);
+
+    if (!contact) throw new Error("Contact not found")
+
+    const toWaId = contact.waId || contact.phoneE164;
+
+    if (!toWaId) throw new Error("Contact dont have wa number")
+
+    const sent = await this.metaClient.sendText(toWaId, payload.text);
+
+    return this.addOutboundMessage({
+      conversationId: conversation.id,
+      providerMessageId: sent.id,
+      text: payload.text,
+      rawPayload: {
+        source: "admin_panel",
+        provider: "META",
+        sentAt: new Date().toISOString()
+      }
+    });
+
   }
 }

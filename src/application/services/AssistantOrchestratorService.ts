@@ -73,6 +73,17 @@ export class AssistantOrchestratorService {
     const contact = await this.contactService.upsert(upsertContactDto);
     const conversation = await this.conversationService.createOrGetActive(contact.id, incoming.provider);
 
+    if(conversation.stage === ConversationStage.PENDING_HUMAN){
+
+      await this.storeInboundDuringHumanControl(conversation.id, incoming);
+      return {
+        ok:true,
+        replyText:"human_control_active",
+        folio:"HUMAN"
+      }
+
+    }
+
     if (this.isUnsupportedIncomingMessage(incoming)) {
       return this.handleUnsupportedIncomingMessage(provider, conversation.id, incoming);
     }
@@ -440,5 +451,21 @@ export class AssistantOrchestratorService {
     }
 
     return undefined;
+  }
+
+  private async storeInboundDuringHumanControl(conversationId:string, incoming:UnifiedIncomingMessage):Promise<void>{
+    if(incoming.providerMessageId){
+      const existing = await this.conversationService.findMessageByProviderMessageId(incoming.providerMessageId)
+      if(existing) return
+    }
+       await this.conversationService.addInboundMessage({
+      conversationId,
+      providerMessageId: incoming.providerMessageId,
+      text: incoming.text,
+      rawPayload: {
+        ...((incoming.rawPayload && typeof incoming.rawPayload === "object") ? incoming.rawPayload : {}),
+        humanControlActive: true
+      }
+    });
   }
 }

@@ -3,6 +3,7 @@ import { Conversation } from "../../domain/entities/Conversation.js";
 import { ConversationStage } from "../../domain/enums/ConversationStage.js";
 import { IConversationRepository } from "../../domain/repositories/IConversationRepository.js";
 import { prisma } from "../database/prisma.js";
+import { ConversationStatus } from "../../domain/enums/ConversationStatus.js";
 
 function mapConversation(row: {
   id: string;
@@ -27,6 +28,17 @@ function mapConversation(row: {
 }
 
 export class PrismaConversationRepository implements IConversationRepository {
+  public async updateStatus(conversationId: string, status: ConversationStatus): Promise<Conversation> {
+
+    const row = await prisma.conversation.update({
+      where:{ id:conversationId},
+      data:{
+        status
+      }
+    })
+
+    return mapConversation(row)
+  }
   public async getActiveByContactId(contactId: string): Promise<Conversation | null> {
     const row = await prisma.conversation.findFirst({
       where: { contactId, status: PrismaConversationStatus.OPEN },

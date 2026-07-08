@@ -1,11 +1,14 @@
+@baseUrl = http://localhost:4000
+@conversationId = REEMPLAZA_CONVERSATION_ID
+
 ### List inquiries
-GET http://localhost:4000/api/inquiries
+GET {{baseUrl}}/api/inquiries
 
 ### Inquiry detail
-GET http://localhost:4000/api/inquiries/INQUIRY_ID
+GET {{baseUrl}}/api/inquiries/INQUIRY_ID
 
 ### Update inquiry status
-POST http://localhost:4000/api/inquiries/INQUIRY_ID/status
+POST {{baseUrl}}/api/inquiries/INQUIRY_ID/status
 Content-Type: application/json
 
 {
@@ -13,15 +16,62 @@ Content-Type: application/json
 }
 
 ### Update inquiry notes
-POST http://localhost:4000/api/inquiries/INQUIRY_ID/notes
+POST {{baseUrl}}/api/inquiries/INQUIRY_ID/notes
 Content-Type: application/json
 
 {
   "notes": "Cliente con urgencia alta y necesidad en estrategia fiscal"
 }
 
-### List conversations
-GET http://localhost:4000/api/conversations
+### 1. List conversations and copy the conversation id
+GET {{baseUrl}}/api/conversations
 
-### Conversation detail
-GET http://localhost:4000/api/conversations/CONVERSATION_ID
+### 2. Conversation detail before taking control
+GET {{baseUrl}}/api/conversations/{{conversationId}}
+
+### 3. Take human control
+# Expected: 200 and data.stage = "PENDING_HUMAN"
+POST {{baseUrl}}/api/conversations/{{conversationId}}/take-control
+
+### 4. Verify human control is active
+# Expected: stage = "PENDING_HUMAN"
+GET {{baseUrl}}/api/conversations/{{conversationId}}
+
+### 5. Send a message as a human operator
+# This sends a real WhatsApp message to the conversation contact.
+# Expected: 201, direction = "OUT"
+POST {{baseUrl}}/api/conversations/{{conversationId}}/messages
+Content-Type: application/json
+
+{
+  "text": "Hola, soy parte del equipo de Conta Magno. Tomé el control de esta conversación para ayudarte personalmente."
+}
+
+### 6. Verify the outgoing message was persisted
+GET {{baseUrl}}/api/conversations/{{conversationId}}
+
+### 7. Release human control
+# Expected: 200 and data.stage = "QUALIFYING"
+POST {{baseUrl}}/api/conversations/{{conversationId}}/release-control
+
+### 8. Verify assistant control is active again
+# Expected: stage = "QUALIFYING"
+GET {{baseUrl}}/api/conversations/{{conversationId}}
+
+### 9. Verify sending without human control is rejected
+# Expected: 400, "You must take control first"
+POST {{baseUrl}}/api/conversations/{{conversationId}}/messages
+Content-Type: application/json
+
+{
+  "text": "Este mensaje no debe enviarse."
+}
+
+### 10. Validate an empty message
+# Expected: 400, "text es obligatorio"
+POST {{baseUrl}}/api/conversations/{{conversationId}}/messages
+Content-Type: application/json
+
+{
+  "text": ""
+}

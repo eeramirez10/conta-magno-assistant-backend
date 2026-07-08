@@ -55,9 +55,11 @@ const appointmentRepository = new PrismaAppointmentRepository();
 
 const contactService = new ContactApplicationService(contactRepository, new ContactDomainService());
 const conversationService = new ConversationApplicationService(
-  conversationRepository,
-  messageRepository,
-  new ConversationDomainService()
+   conversationRepository,
+    messageRepository,
+    contactRepository,
+    new MetaWhatsAppClient(),
+    new ConversationDomainService()
 );
 const inquiryService = new InquiryApplicationService(
   inquiryRepository,

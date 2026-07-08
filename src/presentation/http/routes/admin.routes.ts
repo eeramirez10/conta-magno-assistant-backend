@@ -21,5 +21,19 @@ export function buildAdminRouter(
     notificationController.sendOwnerLeadTemplateTest(req, res).catch(next)
   );
 
+    router.post("/api/conversations/:id/take-control", (req, res, next) =>
+    conversationController.takeControl(req, res).catch(next)
+  );
+
+  router.post("/api/conversations/:id/release-control", (req, res, next) =>
+    conversationController.releaseControl(req, res).catch(next)
+  );
+
+  router.post("/api/conversations/:id/messages", (req, res, next) =>
+    conversationController.sendMessage(req, res).catch(next)
+  );
+
+
+
   return router;
 }
