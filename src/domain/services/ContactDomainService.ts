@@ -1,4 +1,8 @@
 export class ContactDomainService {
+  public normalizeWaId(raw: string): string {
+    return raw.trim().replace(/\D/g, "");
+  }
+
   public normalizePhone(raw: string): string {
     const value = raw.trim();
     const digits = value.replace(/\D/g, "");

@@ -11,7 +11,7 @@ export class ContactApplicationService {
   ) {}
 
   public async getByWaId(dto: GetContactByWaIdRequestDTO): Promise<Contact | null> {
-    return this.contactRepository.findByWaId(dto.waId);
+    return this.contactRepository.findByWaId(this.contactDomainService.normalizeWaId(dto.waId));
   }
 
   public async getById(id: string): Promise<Contact | null> {
@@ -19,11 +19,12 @@ export class ContactApplicationService {
   }
 
   public async upsert(dto: UpsertContactRequestDTO): Promise<Contact> {
+    const waId = this.contactDomainService.normalizeWaId(dto.waId);
     const phone = this.contactDomainService.normalizePhone(dto.phoneE164);
     const fullName = this.contactDomainService.normalizeName(dto.fullName);
 
     return this.contactRepository.upsertByWaId({
-      waId: dto.waId,
+      waId,
       fullName,
       phoneE164: phone,
       email: dto.email,

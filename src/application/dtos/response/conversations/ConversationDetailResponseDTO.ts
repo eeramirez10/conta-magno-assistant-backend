@@ -11,6 +11,7 @@ export class ConversationDetailResponseDTO {
       contactId: string;
       contactName: string | null;
       contactPhone: string | null;
+      contactWaId: string | null;
       displayName: string;
       provider: string;
       stage: string;
@@ -32,7 +33,7 @@ export class ConversationDetailResponseDTO {
       return normalizedName;
     }
 
-    return contact.phoneE164 || contact.waId;
+    return contact.waId || contact.phoneE164;
   }
 
   public static fromEntities(
@@ -44,7 +45,8 @@ export class ConversationDetailResponseDTO {
       id: conversation.id,
       contactId: conversation.contactId,
       contactName: contact?.fullName ?? null,
-      contactPhone: contact?.phoneE164 ?? contact?.waId ?? null,
+      contactPhone: contact?.phoneE164 ?? null,
+      contactWaId: contact?.waId ?? null,
       displayName: ConversationDetailResponseDTO.resolveDisplayName(contact),
       provider: conversation.provider,
       stage: conversation.stage,

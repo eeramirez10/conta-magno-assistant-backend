@@ -7,6 +7,7 @@ export class ConversationListItemResponseDTO {
     public readonly contactId: string,
     public readonly contactName: string | null,
     public readonly contactPhone: string | null,
+    public readonly contactWaId: string | null,
     public readonly displayName: string,
     public readonly provider: string,
     public readonly stage: string,
@@ -25,7 +26,7 @@ export class ConversationListItemResponseDTO {
       return normalizedName;
     }
 
-    return contact.phoneE164 || contact.waId;
+    return contact.waId || contact.phoneE164;
   }
 
   public static fromEntity(entity: Conversation, contact: Contact | null): ConversationListItemResponseDTO {
@@ -33,7 +34,8 @@ export class ConversationListItemResponseDTO {
       entity.id,
       entity.contactId,
       contact?.fullName ?? null,
-      contact?.phoneE164 ?? contact?.waId ?? null,
+      contact?.phoneE164 ?? null,
+      contact?.waId ?? null,
       ConversationListItemResponseDTO.resolveDisplayName(contact),
       entity.provider,
       entity.stage,

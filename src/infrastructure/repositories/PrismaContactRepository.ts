@@ -53,12 +53,14 @@ export class PrismaContactRepository implements IContactRepository {
     timezone?: string;
     consentPrivacy?: boolean;
   }): Promise<Contact> {
+    const hasConfirmedName = !/^prospecto conta magno$/i.test(payload.fullName);
+
     const row = await prisma.contact.upsert({
       where: { waId: payload.waId },
       update: {
-        fullName: payload.fullName,
+        fullName: hasConfirmedName ? payload.fullName : undefined,
         phoneE164: payload.phoneE164,
-        email: payload.email ?? null,
+        email: payload.email ?? undefined,
         timezone: payload.timezone ?? "America/Mexico_City",
         consentPrivacy: payload.consentPrivacy ?? false
       },
