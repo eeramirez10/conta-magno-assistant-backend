@@ -1,5 +1,6 @@
 import cors from "cors";
 import express, { Request, Response } from "express";
+import { createServer } from "node:http";
 import pinoHttp from "pino-http";
 import { ContactDomainService } from "../../domain/services/ContactDomainService.js";
 import { ConversationDomainService } from "../../domain/services/ConversationDomainService.js";
@@ -40,6 +41,8 @@ import { AuthApplicationService } from "../../application/services/AuthApplicati
 import { AuthController } from "./controllers/AuthController.js";
 import { requiredAdminAuth } from "./middlewares/requiredAdminAuth.js";
 import { buildAuthRouter } from "./routes/auth.routes.js";
+import { buildRealtimeServer } from "../../infrastructure/realtime/buildRealtimeServer.js";
+import { SocketIoRealtimePublisher } from "../../infrastructure/realtime/SocketIoRealtimePublisher.js";
 
 
 const app = express();
@@ -56,6 +59,9 @@ app.use(express.urlencoded({ extended: true }));
 const adminUserRepository = new PrismaAdminUserRepository();
 const authService = new AuthApplicationService(adminUserRepository);
 const authController = new AuthController(authService);
+const httpServer = createServer(app);
+const realtimeServer = buildRealtimeServer(httpServer, authService);
+const realtimePublisher = new SocketIoRealtimePublisher(realtimeServer);
 
 
 const contactRepository = new PrismaContactRepository();
@@ -72,7 +78,8 @@ const conversationService = new ConversationApplicationService(
   messageRepository,
   contactRepository,
   new MetaWhatsAppClient(),
-  new ConversationDomainService()
+  new ConversationDomainService(),
+  realtimePublisher
 );
 const inquiryService = new InquiryApplicationService(
   inquiryRepository,
@@ -133,6 +140,6 @@ app.get("/health", (_req: Request, res: Response) => {
 
 app.use(errorHandler);
 
-app.listen(Env.port, () => {
+httpServer.listen(Env.port, () => {
   logger.info({ port: Env.port }, "Assistant backend listening");
 });

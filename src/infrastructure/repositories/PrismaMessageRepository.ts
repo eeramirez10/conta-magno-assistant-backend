@@ -30,14 +30,23 @@ export class PrismaMessageRepository implements IMessageRepository {
     text: string;
     rawPayload: unknown;
   }): Promise<Message> {
-    const row = await prisma.message.create({
-      data: {
-        conversationId: payload.conversationId,
-        direction: payload.direction,
-        providerMessageId: payload.providerMessageId ?? null,
-        text: payload.text,
-        rawPayload: payload.rawPayload as object
-      }
+    const row = await prisma.$transaction(async (transaction) => {
+      const createdMessage = await transaction.message.create({
+        data: {
+          conversationId: payload.conversationId,
+          direction: payload.direction,
+          providerMessageId: payload.providerMessageId ?? null,
+          text: payload.text,
+          rawPayload: payload.rawPayload as object
+        }
+      });
+
+      await transaction.conversation.update({
+        where: { id: payload.conversationId },
+        data: { updatedAt: createdMessage.createdAt }
+      });
+
+      return createdMessage;
     });
 
     return mapMessage(row);

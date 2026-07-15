@@ -7,6 +7,7 @@ import { IMessageRepository } from "../../domain/repositories/IMessageRepository
 import { UpdateConversationStageRequestDTO } from "../dtos/request/tools/UpdateConversationStageRequestDTO.js";
 import { IContactRepository } from "../../domain/repositories/IContactRepository.js";
 import { MetaWhatsAppClient } from '../../infrastructure/integrations/whatsapp/meta/MetaWhatsAppClient.js';
+import { IRealtimePublisher } from '../ports/IRealtimePublisher.js';
 
 export class ConversationApplicationService {
   constructor(
@@ -14,7 +15,8 @@ export class ConversationApplicationService {
     private readonly messageRepository: IMessageRepository,
     private readonly contactRepository: IContactRepository,
     private readonly metaClient: MetaWhatsAppClient,
-    private readonly domainService: ConversationDomainService
+    private readonly domainService: ConversationDomainService,
+    private readonly realtimePublisher: IRealtimePublisher
   ) { }
 
   public async createOrGetActive(contactId: string, provider: string): Promise<Conversation> {
@@ -23,7 +25,9 @@ export class ConversationApplicationService {
       return active;
     }
 
-    return this.conversationRepository.createOpen(contactId, provider);
+    const conversation = await this.conversationRepository.createOpen(contactId, provider);
+    this.realtimePublisher.conversationUpdated(conversation.id);
+    return conversation;
   }
 
   public async updateStage(dto: UpdateConversationStageRequestDTO): Promise<Conversation> {
@@ -36,7 +40,9 @@ export class ConversationApplicationService {
       return current;
     }
 
-    return this.conversationRepository.updateStage(dto.conversationId, dto.stage);
+    const conversation = await this.conversationRepository.updateStage(dto.conversationId, dto.stage);
+    this.realtimePublisher.conversationUpdated(conversation.id);
+    return conversation;
   }
 
   public async setAssistantThreadId(conversationId: string, threadId: string): Promise<Conversation> {
@@ -49,13 +55,15 @@ export class ConversationApplicationService {
     text: string;
     rawPayload: unknown;
   }): Promise<Message> {
-    return this.messageRepository.create({
+    const message = await this.messageRepository.create({
       conversationId: payload.conversationId,
       direction: "IN",
       providerMessageId: payload.providerMessageId,
       text: payload.text,
       rawPayload: payload.rawPayload
     });
+    this.publishMessage(message);
+    return message;
   }
 
   public async addOutboundMessage(payload: {
@@ -64,13 +72,15 @@ export class ConversationApplicationService {
     text: string;
     rawPayload: unknown;
   }): Promise<Message> {
-    return this.messageRepository.create({
+    const message = await this.messageRepository.create({
       conversationId: payload.conversationId,
       direction: "OUT",
       providerMessageId: payload.providerMessageId,
       text: payload.text,
       rawPayload: payload.rawPayload
     });
+    this.publishMessage(message);
+    return message;
   }
 
   public async findMessageByProviderMessageId(providerMessageId: string): Promise<Message | null> {
@@ -100,8 +110,10 @@ export class ConversationApplicationService {
       throw new Error('Conversation not found')
     }
 
-    return this.conversationRepository
+    const updated = await this.conversationRepository
       .updateStage(conversationId, ConversationStage.PENDING_HUMAN);
+    this.realtimePublisher.conversationUpdated(updated.id);
+    return updated;
   }
 
   public async releaseHumanControl(conversationId: string): Promise<Conversation> {
@@ -111,8 +123,10 @@ export class ConversationApplicationService {
       throw new Error('Conversation not found')
     }
 
-    return this.conversationRepository
+    const updated = await this.conversationRepository
       .updateStage(conversationId, ConversationStage.QUALIFYING);
+    this.realtimePublisher.conversationUpdated(updated.id);
+    return updated;
   }
 
   public async sendHumanMessage(payload: { conversationId: string, text: string }): Promise<Message> {
@@ -144,5 +158,10 @@ export class ConversationApplicationService {
       }
     });
 
+  }
+
+  private publishMessage(message: Message): void {
+    this.realtimePublisher.messageCreated(message);
+    this.realtimePublisher.conversationUpdated(message.conversationId);
   }
 }

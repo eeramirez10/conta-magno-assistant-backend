@@ -88,6 +88,20 @@ export class AssistantOrchestratorService {
       return this.handleUnsupportedIncomingMessage(provider, conversation.id, incoming);
     }
 
+    if (incoming.providerMessageId) {
+      const existing = await this.conversationService.findMessageByProviderMessageId(incoming.providerMessageId);
+      if (existing) {
+        return { ok: true, replyText: "duplicate_ignored", folio: "DUPLICATE" };
+      }
+    }
+
+    await this.conversationService.addInboundMessage({
+      conversationId: conversation.id,
+      providerMessageId: incoming.providerMessageId,
+      text: incoming.text,
+      rawPayload: incoming.rawPayload
+    });
+
     const queue = this.getQueueState(conversation.id);
 
     queue.pending.push({ provider, incoming });
@@ -137,28 +151,11 @@ export class AssistantOrchestratorService {
       throw new Error("Contacto no encontrado");
     }
 
-    const acceptedBatch: PendingIncomingItem[] = [];
-    for (const item of batch) {
-      if (item.incoming.providerMessageId) {
-        const existing = await this.conversationService.findMessageByProviderMessageId(item.incoming.providerMessageId);
-        if (existing) {
-          continue;
-        }
-      }
-
-      await this.conversationService.addInboundMessage({
-        conversationId: conversation.id,
-        providerMessageId: item.incoming.providerMessageId,
-        text: item.incoming.text,
-        rawPayload: item.incoming.rawPayload
-      });
-      acceptedBatch.push(item);
-    }
-
-    if (acceptedBatch.length === 0) {
+    if (batch.length === 0) {
       return { ok: true, replyText: "duplicate_ignored", folio: "DUPLICATE" };
     }
 
+    const acceptedBatch = batch;
     const latestItem = acceptedBatch[acceptedBatch.length - 1];
 
     const [openInquiryError, openInquiryDto] = CreateOrGetOpenInquiryRequestDTO.validate({
