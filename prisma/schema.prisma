@@ -172,3 +172,13 @@ model Appointment {
 
   @@index([inquiryId, status])
 }
+
+model AdminUser {
+  id String @id @default(cuid())
+  username String @unique
+  passwordHash String
+  isActive Boolean @default(true)
+  lastLoginAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

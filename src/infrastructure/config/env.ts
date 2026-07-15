@@ -19,9 +19,15 @@ export class Env {
   public static readonly metaWebhookVerifyToken: string = process.env.META_WEBHOOK_VERIFY_TOKEN || "";
   public static readonly twilioAccountSid: string = process.env.TWILIO_ACCOUNT_SID || "";
   public static readonly twilioAuthToken: string = process.env.TWILIO_AUTH_TOKEN || "";
+  public static readonly authJwtSecret: string = process.env.AUTH_JWT_SECRET || "";
+  public static readonly authCookieName: string = process.env.AUTH_COOKIE_NAME || "conta_magno_session";
+  public static readonly authSessionTtlSeconds: number = Env.toInt(process.env.AUTH_SESSION_TTL_SECONDS, 86400);
+  public static readonly isProduction: boolean = process.env.NODE_ENV === "production";
+  public static readonly frontendOrigin: string =
+    process.env.FRONTEND_ORIGIN || "http://localhost:5173";
 
 
-  
+
   public static readonly smtpHost: string = process.env.SMTP_HOST || "";
   public static readonly smtpPort: number = Number(process.env.SMTP_PORT || 587);
   public static readonly smtpSecure: boolean = (process.env.SMTP_SECURE || "false") === "true";
@@ -33,9 +39,9 @@ export class Env {
 
 
 
-    public static readonly twilioWhatsAppFrom: string = process.env.TWILIO_WHATSAPP_FROM || "";
-    public static readonly adminWhatsAppTo: string = process.env.ADMIN_WHATSAPP_TO || "";
-    public static readonly metaOwnerLeadTemplateName: string = process.env.META_OWNER_LEAD_TEMPLATE_NAME || "";
-    public static readonly metaOwnerLeadTemplateLang: string = process.env.META_OWNER_LEAD_TEMPLATE_LANG || "es_MX";
-    public static readonly adminEmailTo: string = process.env.ADMIN_EMAIL_TO || "";
+  public static readonly twilioWhatsAppFrom: string = process.env.TWILIO_WHATSAPP_FROM || "";
+  public static readonly adminWhatsAppTo: string = process.env.ADMIN_WHATSAPP_TO || "";
+  public static readonly metaOwnerLeadTemplateName: string = process.env.META_OWNER_LEAD_TEMPLATE_NAME || "";
+  public static readonly metaOwnerLeadTemplateLang: string = process.env.META_OWNER_LEAD_TEMPLATE_LANG || "es_MX";
+  public static readonly adminEmailTo: string = process.env.ADMIN_EMAIL_TO || "";
 }

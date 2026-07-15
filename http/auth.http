@@ -1,0 +1,44 @@
+@baseUrl = http://localhost:4000
+@username = REEMPLAZA_CON_TU_USUARIO
+@password = REEMPLAZA_CON_TU_PASSWORD
+
+### 1. Una ruta administrativa no debe permitir acceso sin sesion
+# Expected: 401
+GET {{baseUrl}}/api/conversations
+
+### 2. Iniciar sesion
+# Expected: 200 and a Set-Cookie header with conta_magno_session
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "{{username}}",
+  "password": "{{password}}"
+}
+
+### 3. Consultar la sesion activa
+# Expected: 200 and data.user
+# The REST Client must preserve the cookie from the login response.
+GET {{baseUrl}}/api/auth/me
+
+### 4. Acceder a una ruta administrativa con sesion
+# Expected: 200
+GET {{baseUrl}}/api/conversations?limit=20
+
+### 5. Cerrar sesion
+# Expected: 200 and a Set-Cookie header that expires the session cookie
+POST {{baseUrl}}/api/auth/logout
+
+### 6. La misma ruta debe volver a requerir autenticacion
+# Expected: 401
+GET {{baseUrl}}/api/conversations
+
+### 7. Credenciales invalidas
+# Expected: 401
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "{{username}}",
+  "password": "password-invalido"
+}

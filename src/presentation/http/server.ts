@@ -34,15 +34,28 @@ import { errorHandler } from "./middlewares/errorHandler.js";
 import { buildAdminRouter } from "./routes/admin.routes.js";
 import { buildWhatsAppMetaRouter } from "./routes/whatsappMeta.routes.js";
 import { buildWhatsAppTwilioRouter } from "./routes/whatsappTwilio.routes.js";
+import cookieParser from "cookie-parser";
+import { PrismaAdminUserRepository } from "../../infrastructure/repositories/PrismaAdminUserRepository.js";
+import { AuthApplicationService } from "../../application/services/AuthApplicationService.js";
+import { AuthController } from "./controllers/AuthController.js";
+import { requiredAdminAuth } from "./middlewares/requiredAdminAuth.js";
+import { buildAuthRouter } from "./routes/auth.routes.js";
 
 
 const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: Env.frontendOrigin,
+  credentials: true
+}));
+app.use(cookieParser())
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
 // app.use(pinoHttp({ logger }));
 
+const adminUserRepository = new PrismaAdminUserRepository();
+const authService = new AuthApplicationService(adminUserRepository);
+const authController = new AuthController(authService);
 
 
 const contactRepository = new PrismaContactRepository();
@@ -55,11 +68,11 @@ const appointmentRepository = new PrismaAppointmentRepository();
 
 const contactService = new ContactApplicationService(contactRepository, new ContactDomainService());
 const conversationService = new ConversationApplicationService(
-   conversationRepository,
-    messageRepository,
-    contactRepository,
-    new MetaWhatsAppClient(),
-    new ConversationDomainService()
+  conversationRepository,
+  messageRepository,
+  contactRepository,
+  new MetaWhatsAppClient(),
+  new ConversationDomainService()
 );
 const inquiryService = new InquiryApplicationService(
   inquiryRepository,
@@ -107,7 +120,8 @@ const notificationController = new NotificationAdminController(
 
 app.use(buildWhatsAppMetaRouter(metaController));
 app.use(buildWhatsAppTwilioRouter(twilioController));
-app.use(buildAdminRouter(inquiryController, conversationController, notificationController));
+app.use(buildAuthRouter(authController, authService));/*  */
+app.use(buildAdminRouter(inquiryController, conversationController, notificationController, authService));
 
 app.get("/health", (_req: Request, res: Response) => {
   res.status(200).json({

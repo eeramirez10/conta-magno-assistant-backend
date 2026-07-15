@@ -2,13 +2,18 @@ import { Router } from "express";
 import { ConversationAdminController } from "../controllers/ConversationAdminController.js";
 import { InquiryAdminController } from "../controllers/InquiryAdminController.js";
 import { NotificationAdminController } from "../controllers/NotificationAdminController.js";
+import { requiredAdminAuth } from "../middlewares/requiredAdminAuth.js";
+import { AuthApplicationService } from "../../../application/services/AuthApplicationService.js";
 
 export function buildAdminRouter(
   inquiryController: InquiryAdminController,
   conversationController: ConversationAdminController,
-  notificationController: NotificationAdminController
+  notificationController: NotificationAdminController,
+  authService: AuthApplicationService
 ): Router {
   const router = Router();
+
+  router.use('/api', requiredAdminAuth(authService))
 
   router.get("/api/inquiries", (req, res, next) => inquiryController.list(req, res).catch(next));
   router.get("/api/inquiries/:id", (req, res, next) => inquiryController.detail(req, res).catch(next));
