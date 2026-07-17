@@ -2,12 +2,14 @@ import { Contact } from "../../domain/entities/Contact.js";
 import { ContactDomainService } from "../../domain/services/ContactDomainService.js";
 import { GetContactByWaIdRequestDTO } from "../dtos/request/tools/GetContactByWaIdRequestDTO.js";
 import { UpsertContactRequestDTO } from "../dtos/request/tools/UpsertContactRequestDTO.js";
-import { IContactRepository } from "../../domain/repositories/IContactRepository.js";
+import { ContactDeletionResult, ContactSummary, IContactRepository } from "../../domain/repositories/IContactRepository.js";
+import { IRealtimePublisher } from "../ports/IRealtimePublisher.js";
 
 export class ContactApplicationService {
   constructor(
     private readonly contactRepository: IContactRepository,
-    private readonly contactDomainService: ContactDomainService
+    private readonly contactDomainService: ContactDomainService,
+    private readonly realtimePublisher: IRealtimePublisher
   ) {}
 
   public async getByWaId(dto: GetContactByWaIdRequestDTO): Promise<Contact | null> {
@@ -31,5 +33,20 @@ export class ContactApplicationService {
       timezone: dto.timezone,
       consentPrivacy: dto.consentPrivacy
     });
+  }
+
+  public async list(limit = 100): Promise<ContactSummary[]> {
+    return this.contactRepository.list(limit)
+  }
+
+  public async deletePermanently(id: string): Promise<ContactDeletionResult | null> {
+    const result = await this.contactRepository.deleteWithRelations(id)
+    if (!result) return null
+
+    for (const conversationId of result.conversationIds) {
+      this.realtimePublisher.conversationDeleted(conversationId)
+    }
+
+    return result
   }
 }

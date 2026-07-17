@@ -17,6 +17,7 @@ export type ConversationUpdatedEvent = {
 export interface ServerToClientEvents {
   'message:created': (event: MessageCreatedEvent) => void
   'conversation:updated': (event: ConversationUpdatedEvent) => void
+  'conversation:deleted': (event: ConversationUpdatedEvent) => void
 }
 
 export interface ClientToServerEvents {

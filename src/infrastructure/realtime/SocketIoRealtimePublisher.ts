@@ -20,4 +20,10 @@ export class SocketIoRealtimePublisher implements IRealtimePublisher {
   public conversationUpdated(conversationId: string): void {
     this.io.to('admins').emit('conversation:updated', { conversationId })
   }
+
+  public conversationDeleted(conversationId: string): void {
+    const event = { conversationId }
+    this.io.to('admins').emit('conversation:deleted', event)
+    this.io.to(`conversation:${conversationId}`).emit('conversation:deleted', event)
+  }
 }

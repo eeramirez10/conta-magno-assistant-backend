@@ -1,0 +1,16 @@
+@baseUrl = http://localhost:4000
+@contactId = REEMPLAZA_CON_CONTACT_ID
+
+### Listar contactos
+# Expected: 200 and items with contact data and related-record counts.
+GET {{baseUrl}}/api/contacts?limit=100
+
+### Eliminar permanentemente un contacto
+# WARNING: This deletes the contact, messages, conversations, inquiries,
+# notifications, appointments, and releases related appointment capacity.
+# Expected: 200.
+DELETE {{baseUrl}}/api/contacts/{{contactId}}
+
+### Verificar que ya no existe
+# Expected: the deleted contact no longer appears in the list.
+GET {{baseUrl}}/api/contacts?limit=100

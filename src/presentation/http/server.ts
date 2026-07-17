@@ -29,6 +29,7 @@ import { PrismaSlotRepository } from "../../infrastructure/repositories/PrismaSl
 import { ConversationAdminController } from "./controllers/ConversationAdminController.js";
 import { InquiryAdminController } from "./controllers/InquiryAdminController.js";
 import { NotificationAdminController } from "./controllers/NotificationAdminController.js";
+import { ContactAdminController } from "./controllers/ContactAdminController.js";
 import { WhatsAppMetaWebhookController } from "./controllers/WhatsAppMetaWebhookController.js";
 import { WhatsAppTwilioWebhookController } from "./controllers/WhatsAppTwilioWebhookController.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
@@ -72,7 +73,7 @@ const notificationRepository = new PrismaNotificationRepository();
 const slotRepository = new PrismaSlotRepository();
 const appointmentRepository = new PrismaAppointmentRepository();
 
-const contactService = new ContactApplicationService(contactRepository, new ContactDomainService());
+const contactService = new ContactApplicationService(contactRepository, new ContactDomainService(), realtimePublisher);
 const conversationService = new ConversationApplicationService(
   conversationRepository,
   messageRepository,
@@ -124,11 +125,12 @@ const notificationController = new NotificationAdminController(
   new MetaWhatsAppClient(),
   new ContactDomainService()
 );
+const contactController = new ContactAdminController(contactService);
 
 app.use(buildWhatsAppMetaRouter(metaController));
 app.use(buildWhatsAppTwilioRouter(twilioController));
 app.use(buildAuthRouter(authController, authService));/*  */
-app.use(buildAdminRouter(inquiryController, conversationController, notificationController, authService));
+app.use(buildAdminRouter(inquiryController, conversationController, notificationController, contactController, authService));
 
 app.get("/health", (_req: Request, res: Response) => {
   res.status(200).json({
