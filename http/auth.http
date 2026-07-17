@@ -1,13 +1,14 @@
 @baseUrl = http://localhost:4000
 @username = REEMPLAZA_CON_TU_USUARIO
 @password = REEMPLAZA_CON_TU_PASSWORD
+@token = PEGA_AQUI_EL_TOKEN_DEVUELTO_POR_EL_LOGIN
 
-### 1. Una ruta administrativa no debe permitir acceso sin sesion
+### 1. Una ruta administrativa no debe permitir acceso sin token
 # Expected: 401
 GET {{baseUrl}}/api/conversations
 
 ### 2. Iniciar sesion
-# Expected: 200 and a Set-Cookie header with conta_magno_session
+# Expected: 200 and data.token
 POST {{baseUrl}}/api/auth/login
 Content-Type: application/json
 
@@ -16,20 +17,22 @@ Content-Type: application/json
   "password": "{{password}}"
 }
 
-### 3. Consultar la sesion activa
+### 3. Copia data.token de la respuesta anterior en @token y consulta la sesion activa
 # Expected: 200 and data.user
-# The REST Client must preserve the cookie from the login response.
 GET {{baseUrl}}/api/auth/me
+Authorization: Bearer {{token}}
 
-### 4. Acceder a una ruta administrativa con sesion
+### 4. Acceder a una ruta administrativa con token
 # Expected: 200
 GET {{baseUrl}}/api/conversations?limit=20
+Authorization: Bearer {{token}}
 
 ### 5. Cerrar sesion
-# Expected: 200 and a Set-Cookie header that expires the session cookie
+# Expected: 200. El frontend elimina el token de sessionStorage.
 POST {{baseUrl}}/api/auth/logout
+Authorization: Bearer {{token}}
 
-### 6. La misma ruta debe volver a requerir autenticacion
+### 6. La misma ruta debe volver a requerir autenticacion sin token
 # Expected: 401
 GET {{baseUrl}}/api/conversations
 

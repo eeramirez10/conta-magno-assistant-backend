@@ -36,7 +36,6 @@ import { errorHandler } from "./middlewares/errorHandler.js";
 import { buildAdminRouter } from "./routes/admin.routes.js";
 import { buildWhatsAppMetaRouter } from "./routes/whatsappMeta.routes.js";
 import { buildWhatsAppTwilioRouter } from "./routes/whatsappTwilio.routes.js";
-import cookieParser from "cookie-parser";
 import { PrismaAdminUserRepository } from "../../infrastructure/repositories/PrismaAdminUserRepository.js";
 import { AuthApplicationService } from "../../application/services/AuthApplicationService.js";
 import { AuthController } from "./controllers/AuthController.js";
@@ -50,9 +49,8 @@ const app = express();
 
 app.use(cors({
   origin: Env.frontendOrigin,
-  credentials: true
+  allowedHeaders: ['Authorization', 'Content-Type'],
 }));
-app.use(cookieParser())
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
 // app.use(pinoHttp({ logger }));

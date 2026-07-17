@@ -7,22 +7,6 @@ import type { ClientToServerEvents, ServerToClientEvents, SocketData } from './r
 
 export type RealtimeServer = Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>
 
-function readCookie(cookieHeader: string | undefined, name: string): string | null {
-  if (!cookieHeader) return null
-
-  for (const cookie of cookieHeader.split(';')) {
-    const separatorIndex = cookie.indexOf('=')
-    if (separatorIndex < 0) continue
-
-    const cookieName = cookie.slice(0, separatorIndex).trim()
-    if (cookieName !== name) continue
-
-    return decodeURIComponent(cookie.slice(separatorIndex + 1).trim())
-  }
-
-  return null
-}
-
 function conversationRoom(conversationId: string): string | null {
   const normalizedId = conversationId.trim()
   return /^[a-zA-Z0-9_-]{1,100}$/.test(normalizedId)
@@ -35,14 +19,18 @@ export function buildRealtimeServer(
   authService: AuthApplicationService,
 ): RealtimeServer {
   const io: RealtimeServer = new Server(httpServer, {
+    // Avoid Nginx redirecting /socket.io/ before Socket.IO can add CORS headers.
+    addTrailingSlash: false,
     cors: {
       origin: Env.frontendOrigin,
-      credentials: true,
+      credentials: false,
     },
   })
 
   io.use(async (socket, next) => {
-    const token = readCookie(socket.handshake.headers.cookie, Env.authCookieName)
+    const token = typeof socket.handshake.auth.token === 'string'
+      ? socket.handshake.auth.token
+      : null
     if (!token) {
       next(new Error('Sesión no autenticada'))
       return
