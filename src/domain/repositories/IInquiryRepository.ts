@@ -3,6 +3,7 @@ import { InquiryStatus } from "../enums/InquiryStatus.js";
 
 export interface IInquiryRepository {
   getOpenByContactId(contactId: string): Promise<Inquiry | null>;
+  getLatestByConversationId(conversationId: string): Promise<Inquiry | null>;
   createOpen(payload: {
     contactId: string;
     conversationId: string;

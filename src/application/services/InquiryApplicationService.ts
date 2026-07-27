@@ -67,6 +67,10 @@ export class InquiryApplicationService {
     return updated;
   }
 
+  public async getLatestByConversationId(conversationId: string): Promise<Inquiry | null> {
+    return this.inquiryRepository.getLatestByConversationId(conversationId);
+  }
+
   public async updateStatus(dto: UpdateInquiryStatusRequestDTO): Promise<Inquiry> {
     return this.inquiryRepository.updateStatus(dto.inquiryId, dto.status);
   }

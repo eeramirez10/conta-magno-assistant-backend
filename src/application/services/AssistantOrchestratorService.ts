@@ -16,6 +16,7 @@ import { InquiryApplicationService } from "./InquiryApplicationService.js";
 import { NotificationApplicationService } from "./NotificationApplicationService.js";
 import { AssistantToolRouterService } from "./AssistantToolRouterService.js";
 import { logger } from "../../infrastructure/logging/logger.js";
+import { Inquiry } from "../../domain/entities/Inquiry.js";
 
 type PendingIncomingItem = {
   provider: IWhatsAppProvider;
@@ -158,25 +159,36 @@ export class AssistantOrchestratorService {
     const acceptedBatch = batch;
     const latestItem = acceptedBatch[acceptedBatch.length - 1];
 
-    const [openInquiryError, openInquiryDto] = CreateOrGetOpenInquiryRequestDTO.validate({
-      contactId: contact.id,
-      conversationId: conversation.id
-    });
+    const isCompletedFlow = conversation.stage === ConversationStage.COMPLETED;
+    let inquiry: Inquiry;
 
-    if (openInquiryError || !openInquiryDto) {
-      throw new Error(openInquiryError ?? "No se pudo preparar inquiry");
-    }
-
-    const openInquiryResult = await this.inquiryService.createOrGetOpen(openInquiryDto);
-    const inquiry = openInquiryResult.inquiry;
-
-    if (openInquiryResult.created) {
-      await this.notificationService.notifyLeadCreated({
-        inquiryId: inquiry.id,
-        folio: inquiry.folio,
-        contactPhone: contact.phoneE164,
-        mainNeed: inquiry.mainNeed
+    if (isCompletedFlow) {
+      const completedInquiry = await this.inquiryService.getLatestByConversationId(conversation.id);
+      if (!completedInquiry) {
+        throw new Error("La conversación completada no tiene un inquiry asociado");
+      }
+      inquiry = completedInquiry;
+    } else {
+      const [openInquiryError, openInquiryDto] = CreateOrGetOpenInquiryRequestDTO.validate({
+        contactId: contact.id,
+        conversationId: conversation.id
       });
+
+      if (openInquiryError || !openInquiryDto) {
+        throw new Error(openInquiryError ?? "No se pudo preparar inquiry");
+      }
+
+      const openInquiryResult = await this.inquiryService.createOrGetOpen(openInquiryDto);
+      inquiry = openInquiryResult.inquiry;
+
+      if (openInquiryResult.created) {
+        await this.notificationService.notifyLeadCreated({
+          inquiryId: inquiry.id,
+          folio: inquiry.folio,
+          contactPhone: contact.phoneE164,
+          mainNeed: inquiry.mainNeed
+        });
+      }
     }
 
     const messages = await this.conversationService.listMessages(conversation.id);
@@ -189,7 +201,8 @@ export class AssistantOrchestratorService {
       conversation: {
         id: conversation.id,
         stage: conversation.stage,
-        status: conversation.status
+        status: conversation.status,
+        flowCompleted: isCompletedFlow
       },
       inquiry,
       packages: {
@@ -214,7 +227,9 @@ export class AssistantOrchestratorService {
       threadId: conversation.assistantThreadId,
       prompt: contaMagnoAssistantPrompt,
       contextJson,
-      onToolCall: async (toolCall) => this.toolRouterService.executeNativeTool(toolCall, toolContext)
+      onToolCall: async (toolCall) => isCompletedFlow
+        ? { ok: false, error: "El inquiry ya está completado y no puede modificarse." }
+        : this.toolRouterService.executeNativeTool(toolCall, toolContext)
     });
 
     if (!conversation.assistantThreadId) {
@@ -223,7 +238,7 @@ export class AssistantOrchestratorService {
 
     const extracted = assistantResult.output.extractedFields;
 
-    if (extracted.fullName || extracted.email || extracted.phoneWhatsApp) {
+    if (!isCompletedFlow && (extracted.fullName || extracted.email || extracted.phoneWhatsApp)) {
       const [err, dto] = UpsertContactRequestDTO.validate({
         waId: contact.waId,
         fullName: extracted.fullName ?? contact.fullName,
@@ -236,23 +251,24 @@ export class AssistantOrchestratorService {
       }
     }
 
-    const combinedInboundText = acceptedBatch.map((item) => item.incoming.text).join("\n");
-    const inferredClientType = extracted.clientType ?? this.inferClientTypeFromMessage(combinedInboundText);
-
-    const [updateFieldsErr, updateFieldsDto] = UpdateInquiryFieldsRequestDTO.validate({
-      inquiryId: inquiry.id,
-      clientType: inferredClientType,
-      specialtyProfile: extracted.specialtyProfile,
-      mainNeed: extracted.mainNeed,
-      urgency: extracted.urgency,
-      budgetRange: extracted.budgetRange,
-      recommendedPlan: extracted.recommendedPlan
-    });
-
     let latestInquiry = inquiry;
 
-    if (!updateFieldsErr && updateFieldsDto) {
-      latestInquiry = await this.inquiryService.updateFields(updateFieldsDto);
+    if (!isCompletedFlow) {
+      const combinedInboundText = acceptedBatch.map((item) => item.incoming.text).join("\n");
+      const inferredClientType = extracted.clientType ?? this.inferClientTypeFromMessage(combinedInboundText);
+      const [updateFieldsErr, updateFieldsDto] = UpdateInquiryFieldsRequestDTO.validate({
+        inquiryId: inquiry.id,
+        clientType: inferredClientType,
+        specialtyProfile: extracted.specialtyProfile,
+        mainNeed: extracted.mainNeed,
+        urgency: extracted.urgency,
+        budgetRange: extracted.budgetRange,
+        recommendedPlan: extracted.recommendedPlan
+      });
+
+      if (!updateFieldsErr && updateFieldsDto) {
+        latestInquiry = await this.inquiryService.updateFields(updateFieldsDto);
+      }
     }
 
     const hasOwnerLeadTemplateData =
@@ -262,23 +278,9 @@ export class AssistantOrchestratorService {
       Boolean(latestInquiry.mainNeed?.trim()) &&
       Boolean(latestInquiry.recommendedPlan?.trim());
 
-    if (hasOwnerLeadTemplateData) {
-      await this.notificationService.notifyOwnerLeadTemplate({
-        inquiryId: latestInquiry.id,
-        folio: latestInquiry.folio,
-        fullName: contact.fullName.trim(),
-        phoneE164: contact.phoneE164.trim(),
-        email: (contact.email ?? "").trim(),
-        mainNeed: latestInquiry.mainNeed!.trim(),
-        recommendedPlan: latestInquiry.recommendedPlan!.trim()
-      });
-    }
-
-
-
     const toolResults = [...assistantResult.toolResults];
 
-    if (assistantResult.output.toolCalls && assistantResult.output.toolCalls.length > 0) {
+    if (!isCompletedFlow && assistantResult.output.toolCalls && assistantResult.output.toolCalls.length > 0) {
       const legacyResults = await this.toolRouterService.executeMany(assistantResult.output.toolCalls, toolContext);
       toolResults.push(...legacyResults);
     }
@@ -286,7 +288,7 @@ export class AssistantOrchestratorService {
     logger.info({ toolResults }, "Assistant tool results");
 
     const nextStage = this.conversationService.stageFromString(assistantResult.output.nextStage);
-    if (nextStage) {
+    if (!isCompletedFlow && nextStage) {
       const [stageErr, stageDto] = UpdateConversationStageRequestDTO.validate({
         conversationId: conversation.id,
         stage: nextStage
@@ -303,6 +305,18 @@ export class AssistantOrchestratorService {
         });
         if (!statusErr && statusDto) {
           await this.inquiryService.updateStatus(statusDto);
+        }
+
+        if (hasOwnerLeadTemplateData) {
+          await this.notificationService.notifyOwnerLeadTemplate({
+            inquiryId: latestInquiry.id,
+            folio: latestInquiry.folio,
+            fullName: contact.fullName.trim(),
+            phoneE164: contact.phoneE164.trim(),
+            email: (contact.email ?? "").trim(),
+            mainNeed: latestInquiry.mainNeed!.trim(),
+            recommendedPlan: latestInquiry.recommendedPlan!.trim()
+          });
         }
       }
 
@@ -465,4 +479,5 @@ export class AssistantOrchestratorService {
       }
     });
   }
+
 }

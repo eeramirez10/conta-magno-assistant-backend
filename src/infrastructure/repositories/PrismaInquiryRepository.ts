@@ -59,6 +59,15 @@ export class PrismaInquiryRepository implements IInquiryRepository {
     return row ? mapInquiry(row) : null;
   }
 
+  public async getLatestByConversationId(conversationId: string): Promise<Inquiry | null> {
+    const row = await prisma.inquiry.findFirst({
+      where: { conversationId },
+      orderBy: { updatedAt: "desc" }
+    });
+
+    return row ? mapInquiry(row) : null;
+  }
+
   public async createOpen(payload: { contactId: string; conversationId: string; folio: string }): Promise<Inquiry> {
     const row = await prisma.inquiry.create({
       data: {
