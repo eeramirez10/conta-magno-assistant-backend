@@ -1,0 +1,12 @@
+node_modules
+dist
+coverage
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+npm-debug.log*
+pnpm-debug.log*
+storage/documents/*
+Dockerfile.backup*
