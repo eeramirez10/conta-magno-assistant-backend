@@ -10,6 +10,7 @@ function mapConversation(row: {
   contactId: string;
   provider: string;
   assistantThreadId: string | null;
+  openAiConversationId: string | null;
   status: PrismaConversationStatus;
   stage: PrismaConversationStage;
   createdAt: Date;
@@ -23,7 +24,8 @@ function mapConversation(row: {
     row.status as Conversation["status"],
     row.stage as Conversation["stage"],
     row.createdAt,
-    row.updatedAt
+    row.updatedAt,
+    row.openAiConversationId
   );
 }
 
@@ -70,13 +72,29 @@ export class PrismaConversationRepository implements IConversationRepository {
     return mapConversation(row);
   }
 
-  public async setAssistantThreadId(conversationId: string, assistantThreadId: string): Promise<Conversation> {
-    const row = await prisma.conversation.update({
-      where: { id: conversationId },
-      data: { assistantThreadId }
+  public async updateStageUnlessHumanControls(conversationId: string, stage: ConversationStage): Promise<Conversation> {
+    await prisma.conversation.updateMany({
+      where: { id: conversationId, stage: { not: PrismaConversationStage.PENDING_HUMAN } },
+      data: { stage: stage as PrismaConversationStage }
+    });
+    const conversation = await this.findById(conversationId);
+    if (!conversation) throw new Error("Conversación no encontrada");
+    return conversation;
+  }
+
+  public async setOpenAiConversationId(conversationId: string, openAiConversationId: string): Promise<Conversation> {
+    // Switching remote memory also resets sync markers in the same local transaction.
+    const row = await prisma.$transaction(async (transaction) => {
+      await transaction.message.updateMany({ where: { conversationId }, data: { openAiSyncedAt: null } });
+      return transaction.conversation.update({ where: { id: conversationId }, data: { openAiConversationId } });
     });
 
     return mapConversation(row);
+  }
+
+  public async listByContactId(contactId: string): Promise<Conversation[]> {
+    const rows = await prisma.conversation.findMany({ where: { contactId } });
+    return rows.map(mapConversation);
   }
 
   public async list(limit = 50): Promise<Conversation[]> {

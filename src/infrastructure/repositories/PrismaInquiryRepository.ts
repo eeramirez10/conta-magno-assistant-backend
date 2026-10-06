@@ -102,9 +102,20 @@ export class PrismaInquiryRepository implements IInquiryRepository {
   }
 
   public async updateStatus(inquiryId: string, status: InquiryStatus): Promise<Inquiry> {
-    const row = await prisma.inquiry.update({
-      where: { id: inquiryId },
-      data: { status: status as PrismaInquiryStatus }
+    const row = await prisma.$transaction(async (transaction) => {
+      const updated = await transaction.inquiry.update({
+        where: { id: inquiryId }, data: { status: status as PrismaInquiryStatus }
+      });
+      if (status === InquiryStatus.QUALIFIED || status === InquiryStatus.CLOSED) {
+        const reset = await transaction.inquiry.updateMany({
+          where: { id: inquiryId, incomingNotificationResetAt: null },
+          data: { incomingNotificationResetAt: new Date() }
+        });
+        if (reset.count) await transaction.contact.update({
+          where: { id: updated.contactId }, data: { incomingNotificationCycle: { increment: 1 } }
+        });
+      }
+      return updated;
     });
 
     return mapInquiry(row);

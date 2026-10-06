@@ -1,3 +1,9 @@
+# Responses rollout: configure OPENAI_MODEL=gpt-6-luna, apply prisma:deploy,
+# run prisma:generate and build, then restart the backend (see README).
+# Each test turn must use a new provider message ID. The same ID is deduplicated.
+# These webhook requests can send real WhatsApp. For an isolated API test use:
+# pnpm responses:smoke
+
 ### Health
 GET http://localhost:4000/health
 

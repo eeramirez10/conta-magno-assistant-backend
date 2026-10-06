@@ -15,7 +15,7 @@ import { MetaWhatsAppProviderAdapter } from "../../infrastructure/adapters/messa
 import { TwilioWhatsAppProviderAdapter } from "../../infrastructure/adapters/messaging/TwilioWhatsAppProviderAdapter.js";
 import { Env } from "../../infrastructure/config/env.js";
 import { EmailClient } from "../../infrastructure/integrations/email/EmailClient.js";
-import { AssistantClient } from "../../infrastructure/integrations/openai/AssistantClient.js";
+import { ResponsesClient } from "../../infrastructure/integrations/openai/ResponsesClient.js";
 import { MetaWhatsAppClient } from "../../infrastructure/integrations/whatsapp/meta/MetaWhatsAppClient.js";
 import { TwilioWhatsAppClient } from "../../infrastructure/integrations/whatsapp/twilio/TwilioWhatsAppClient.js";
 import { logger } from "../../infrastructure/logging/logger.js";
@@ -43,6 +43,9 @@ import { requiredAdminAuth } from "./middlewares/requiredAdminAuth.js";
 import { buildAuthRouter } from "./routes/auth.routes.js";
 import { buildRealtimeServer } from "../../infrastructure/realtime/buildRealtimeServer.js";
 import { SocketIoRealtimePublisher } from "../../infrastructure/realtime/SocketIoRealtimePublisher.js";
+import { IncomingNotificationApplicationService } from "../../application/services/IncomingNotificationApplicationService.js";
+import { PrismaIncomingNotificationRepository } from "../../infrastructure/repositories/PrismaIncomingNotificationRepository.js";
+import { SettingsAdminController } from "./controllers/SettingsAdminController.js";
 
 
 const app = express();
@@ -71,14 +74,16 @@ const notificationRepository = new PrismaNotificationRepository();
 const slotRepository = new PrismaSlotRepository();
 const appointmentRepository = new PrismaAppointmentRepository();
 
-const contactService = new ContactApplicationService(contactRepository, new ContactDomainService(), realtimePublisher);
+const responsesClient = new ResponsesClient();
+const contactService = new ContactApplicationService(contactRepository, new ContactDomainService(), realtimePublisher, conversationRepository, responsesClient);
 const conversationService = new ConversationApplicationService(
   conversationRepository,
   messageRepository,
   contactRepository,
   new MetaWhatsAppClient(),
   new ConversationDomainService(),
-  realtimePublisher
+  realtimePublisher,
+  inquiryRepository
 );
 const inquiryService = new InquiryApplicationService(
   inquiryRepository,
@@ -100,13 +105,17 @@ const toolRouterService = new AssistantToolRouterService(
   notificationService
 );
 
+const incomingNotifications = new IncomingNotificationApplicationService(new PrismaIncomingNotificationRepository(), new MetaWhatsAppClient());
+const settingsController = new SettingsAdminController(incomingNotifications);
+
 const orchestratorService = new AssistantOrchestratorService(
-  new AssistantClient(),
+  responsesClient,
   contactService,
   conversationService,
   inquiryService,
   notificationService,
-  toolRouterService
+  toolRouterService,
+  incomingNotifications
 );
 
 const metaController = new WhatsAppMetaWebhookController(
@@ -128,7 +137,7 @@ const contactController = new ContactAdminController(contactService);
 app.use(buildWhatsAppMetaRouter(metaController));
 app.use(buildWhatsAppTwilioRouter(twilioController));
 app.use(buildAuthRouter(authController, authService));/*  */
-app.use(buildAdminRouter(inquiryController, conversationController, notificationController, contactController, authService));
+app.use(buildAdminRouter(inquiryController, conversationController, notificationController, contactController, authService, settingsController));
 
 app.get("/health", (_req: Request, res: Response) => {
   res.status(200).json({

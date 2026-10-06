@@ -5,17 +5,23 @@ import { NotificationAdminController } from "../controllers/NotificationAdminCon
 import { requiredAdminAuth } from "../middlewares/requiredAdminAuth.js";
 import { AuthApplicationService } from "../../../application/services/AuthApplicationService.js";
 import { ContactAdminController } from "../controllers/ContactAdminController.js";
+import { SettingsAdminController } from "../controllers/SettingsAdminController.js";
 
 export function buildAdminRouter(
   inquiryController: InquiryAdminController,
   conversationController: ConversationAdminController,
   notificationController: NotificationAdminController,
   contactController: ContactAdminController,
-  authService: AuthApplicationService
+  authService: AuthApplicationService,
+  settingsController: SettingsAdminController
 ): Router {
   const router = Router();
 
   router.use('/api', requiredAdminAuth(authService))
+
+  router.get("/api/settings/incoming-notifications", (req, res, next) => settingsController.get(req, res).catch(next));
+  router.patch("/api/settings/incoming-notifications", (req, res, next) => settingsController.update(req, res).catch(next));
+  router.post("/api/settings/incoming-notifications/test", (req, res, next) => settingsController.test(req, res).catch(next));
 
   router.get("/api/inquiries", (req, res, next) => inquiryController.list(req, res).catch(next));
   router.get("/api/inquiries/:id", (req, res, next) => inquiryController.detail(req, res).catch(next));

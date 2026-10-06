@@ -12,7 +12,6 @@
     "start": "node dist/presentation/http/server.js",
     "env:use:dev": "cp .env.development .env",
     "env:use:prod": "cp .env.production .env",
-    "assistant:bootstrap": "tsx src/scripts/bootstrapAssistant.ts",
     "preprisma:migrate": "pnpm run env:use:dev",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
@@ -21,7 +20,9 @@
     "predb:clear:dev": "pnpm run env:use:dev",
     "db:clear:dev": "tsx src/scripts/clearDevData.ts",
     "preseed": "pnpm run env:use:dev",
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts",
+    "test": "tsx --test tests/*.test.ts",
+    "responses:smoke": "tsx src/scripts/responsesSmoke.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.4.1",
@@ -33,7 +34,7 @@
     "express-rate-limit": "^8.5.2",
     "jose": "^6.2.3",
     "nodemailer": "^6.10.1",
-    "openai": "^4.86.2",
+    "openai": "7.28.0",
     "pino": "^9.6.0",
     "pino-http": "^10.4.0",
     "socket.io": "^4.8.3",

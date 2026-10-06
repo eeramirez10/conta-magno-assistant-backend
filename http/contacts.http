@@ -8,7 +8,9 @@ GET {{baseUrl}}/api/contacts?limit=100
 ### Eliminar permanentemente un contacto
 # WARNING: This deletes the contact, messages, conversations, inquiries,
 # notifications, appointments, and releases related appointment capacity.
-# Expected: 200.
+# Expected: 200 only after remote items/conversations and local records are deleted.
+# OpenAI 404 is tolerated; another remote error returns 500 and preserves local data.
+# Retry the DELETE after correcting connectivity/credentials.
 DELETE {{baseUrl}}/api/contacts/{{contactId}}
 
 ### Verificar que ya no existe

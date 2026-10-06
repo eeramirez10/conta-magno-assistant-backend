@@ -6,6 +6,7 @@ export class Message {
     public providerMessageId: string | null,
     public text: string,
     public rawPayload: unknown,
-    public createdAt: Date
+    public createdAt: Date,
+    public openAiSyncedAt: Date | null = null
   ) {}
 }

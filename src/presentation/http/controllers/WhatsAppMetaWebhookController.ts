@@ -25,35 +25,6 @@ export class WhatsAppMetaWebhookController {
   public async handle(req: Request, res: Response): Promise<void> {
     const [error, dto] = MetaIncomingMessageRequestDTO.validate(req.body);
 
-    const value = (req.body as any)?.entry?.[0]?.changes?.[0]?.value;
-    const contact = value?.contacts?.[0];
-    const message = value?.messages?.[0];
-    const status = value?.statuses?.[0];
-
-    if (message) {
-      console.log({
-        contactName: contact?.profile?.name ?? null,
-        contactWaId: contact?.wa_id ?? message?.from ?? null,
-        messageText: message?.text?.body ?? "",
-        messageType: message?.type ?? null
-      });
-    }
-
-    if (status) {
-      // console.log({
-      //   statusMessageId: status?.id ?? null,
-      //   statusRecipientId: status?.recipient_id ?? null,
-      //   statusValue: status?.status ?? null,
-      //   statusTimestamp: status?.timestamp ?? null,
-      //   statusConversationId: status?.conversation?.id ?? null,
-      //   statusConversationOrigin: status?.conversation?.origin?.type ?? null,
-      //   statusPricingCategory: status?.pricing?.category ?? null,
-      //   statusErrorCode: status?.errors?.[0]?.code ?? null,
-      //   statusErrorTitle: status?.errors?.[0]?.title ?? null,
-      //   statusErrorMessage: status?.errors?.[0]?.message ?? null
-      // });
-    }
-
     if (error || !dto) {
       res.status(400).json({ ok: false, message: error ?? "Payload inválido" });
       return;

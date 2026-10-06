@@ -3,7 +3,7 @@ import { InquiryStatus } from "../../domain/enums/InquiryStatus.js";
 import { CONTRIBUYENTE_TYPE_OPTIONS } from "../../domain/enums/ContribuyenteType.js";
 import { IWhatsAppProvider, UnifiedIncomingMessage } from "../../infrastructure/adapters/messaging/IWhatsAppProvider.js";
 import { Env } from "../../infrastructure/config/env.js";
-import { AssistantClient } from "../../infrastructure/integrations/openai/AssistantClient.js";
+import { ResponsesClient, AssistantTurnStoppedError } from "../../infrastructure/integrations/openai/ResponsesClient.js";
 import { contaMagnoAssistantPrompt } from "../prompts/contaMagnoAssistantPrompt.js";
 import { CreateOrGetOpenInquiryRequestDTO } from "../dtos/request/tools/CreateOrGetOpenInquiryRequestDTO.js";
 import { UpdateConversationStageRequestDTO } from "../dtos/request/tools/UpdateConversationStageRequestDTO.js";
@@ -15,12 +15,13 @@ import { ConversationApplicationService } from "./ConversationApplicationService
 import { InquiryApplicationService } from "./InquiryApplicationService.js";
 import { NotificationApplicationService } from "./NotificationApplicationService.js";
 import { AssistantToolRouterService } from "./AssistantToolRouterService.js";
-import { logger } from "../../infrastructure/logging/logger.js";
 import { Inquiry } from "../../domain/entities/Inquiry.js";
+import { IncomingNotificationApplicationService } from "./IncomingNotificationApplicationService.js";
 
 type PendingIncomingItem = {
   provider: IWhatsAppProvider;
   incoming: UnifiedIncomingMessage;
+  messageId: string;
 };
 
 type ConversationQueueState = {
@@ -48,19 +49,16 @@ export class AssistantOrchestratorService {
   };
 
   constructor(
-    private readonly assistantClient: AssistantClient,
+    private readonly responsesClient: ResponsesClient,
     private readonly contactService: ContactApplicationService,
     private readonly conversationService: ConversationApplicationService,
     private readonly inquiryService: InquiryApplicationService,
     private readonly notificationService: NotificationApplicationService,
-    private readonly toolRouterService: AssistantToolRouterService
+    private readonly toolRouterService: AssistantToolRouterService,
+    private readonly incomingNotifications: Pick<IncomingNotificationApplicationService, "notifyMessage">
   ) { }
 
   public async processIncoming(provider: IWhatsAppProvider, incoming: UnifiedIncomingMessage): Promise<{ ok: boolean; replyText: string; folio: string }> {
-    if (!Env.openAiAssistantId) {
-      throw new Error("Falta OPENAI_ASSISTANT_ID. Ejecuta: npm run assistant:bootstrap");
-    }
-
     const [upsertContactError, upsertContactDto] = UpsertContactRequestDTO.validate({
       waId: incoming.waId,
       fullName: "Prospecto Conta Magno",
@@ -72,69 +70,80 @@ export class AssistantOrchestratorService {
     }
 
     const contact = await this.contactService.upsert(upsertContactDto);
-    const conversation = await this.conversationService.createOrGetActive(contact.id, incoming.provider);
+    return this.contactService.withConversationActivity(contact.id, async () => {
+      const conversation = await this.conversationService.createOrGetActive(contact.id, incoming.provider);
 
-    if(conversation.stage === ConversationStage.PENDING_HUMAN){
-
-      await this.storeInboundDuringHumanControl(conversation.id, incoming);
-      return {
-        ok:true,
-        replyText:"human_control_active",
-        folio:"HUMAN"
+      if (incoming.providerMessageId) {
+        const existing = await this.conversationService.findMessageByProviderMessageId(incoming.providerMessageId);
+        if (existing) {
+          return { ok: true, replyText: "duplicate_ignored", folio: "DUPLICATE" };
+        }
       }
 
-    }
+      const humanControlActive = conversation.stage === ConversationStage.PENDING_HUMAN;
+      const message = await this.conversationService.addInboundMessage({
+        conversationId: conversation.id,
+        providerMessageId: incoming.providerMessageId,
+        text: this.isUnsupportedIncomingMessage(incoming) ? this.buildUnsupportedInboundText(incoming.messageType) : incoming.text,
+        rawPayload: humanControlActive ? {
+          ...((incoming.rawPayload && typeof incoming.rawPayload === "object") ? incoming.rawPayload : {}),
+          humanControlActive: true
+        } : incoming.rawPayload
+      }).catch(async (error: unknown) => {
+        // Two deliveries of the same webhook can race the initial lookup.
+        if (incoming.providerMessageId && error && typeof error === "object" && "code" in error && error.code === "P2002" &&
+          await this.conversationService.findMessageByProviderMessageId(incoming.providerMessageId)) return null;
+        throw error;
+      });
+      if (!message) return { ok: true, replyText: "duplicate_ignored", folio: "DUPLICATE" };
 
-    if (this.isUnsupportedIncomingMessage(incoming)) {
-      return this.handleUnsupportedIncomingMessage(provider, conversation.id, incoming);
-    }
+      // Start the alert alongside the assistant; keep it inside the contact activity
+      // so deletion waits until its delivery records have settled.
+      const notification = this.incomingNotifications.notifyMessage({
+        messageId: message.id, senderWaId: incoming.waId, senderName: contact.fullName
+      });
+      try {
+        if (humanControlActive) return { ok: true, replyText: "human_control_active", folio: "HUMAN" };
+        if (this.isUnsupportedIncomingMessage(incoming)) {
+          return await this.handleUnsupportedIncomingMessage(provider, conversation.id, incoming);
+        }
 
-    if (incoming.providerMessageId) {
-      const existing = await this.conversationService.findMessageByProviderMessageId(incoming.providerMessageId);
-      if (existing) {
-        return { ok: true, replyText: "duplicate_ignored", folio: "DUPLICATE" };
+        const queue = this.getQueueState(conversation.id);
+
+        queue.pending.push({ provider, incoming, messageId: message.id });
+
+        if (queue.isProcessing) {
+          return { ok: true, replyText: "queued_while_busy", folio: "QUEUED" };
+        }
+
+        queue.isProcessing = true;
+        let firstResult: { ok: boolean; replyText: string; folio: string } | null = null;
+
+        try {
+          while (queue.pending.length > 0) {
+            await this.waitForQueueWindow();
+            const currentBatch = queue.pending.splice(0);
+            if (currentBatch.length === 0) {
+              continue;
+            }
+
+            const batchResult = await this.processBatch(conversation.id, contact.id, currentBatch);
+            if (!firstResult) {
+              firstResult = batchResult;
+            }
+          }
+        } finally {
+          queue.isProcessing = false;
+          if (queue.pending.length === 0) {
+            AssistantOrchestratorService.queueByConversationId.delete(conversation.id);
+          }
+        }
+
+        return firstResult ?? { ok: true, replyText: "duplicate_ignored", folio: "DUPLICATE" };
+      } finally {
+        await notification;
       }
-    }
-
-    await this.conversationService.addInboundMessage({
-      conversationId: conversation.id,
-      providerMessageId: incoming.providerMessageId,
-      text: incoming.text,
-      rawPayload: incoming.rawPayload
     });
-
-    const queue = this.getQueueState(conversation.id);
-
-    queue.pending.push({ provider, incoming });
-
-    if (queue.isProcessing) {
-      return { ok: true, replyText: "queued_while_busy", folio: "QUEUED" };
-    }
-
-    queue.isProcessing = true;
-    let firstResult: { ok: boolean; replyText: string; folio: string } | null = null;
-
-    try {
-      while (queue.pending.length > 0) {
-        await this.waitForQueueWindow();
-        const currentBatch = queue.pending.splice(0);
-        if (currentBatch.length === 0) {
-          continue;
-        }
-
-        const batchResult = await this.processBatch(conversation.id, contact.id, currentBatch);
-        if (!firstResult) {
-          firstResult = batchResult;
-        }
-      }
-    } finally {
-      queue.isProcessing = false;
-      if (queue.pending.length === 0) {
-        AssistantOrchestratorService.queueByConversationId.delete(conversation.id);
-      }
-    }
-
-    return firstResult ?? { ok: true, replyText: "duplicate_ignored", folio: "DUPLICATE" };
   }
 
   private async processBatch(
@@ -142,10 +151,20 @@ export class AssistantOrchestratorService {
     contactId: string,
     batch: PendingIncomingItem[]
   ): Promise<{ ok: boolean; replyText: string; folio: string }> {
-    let conversation = await this.conversationService.getConversation(conversationId);
+    const conversation = await this.conversationService.getConversation(conversationId);
     if (!conversation) {
       throw new Error("Conversación no encontrada");
     }
+
+    if (conversation.stage === ConversationStage.PENDING_HUMAN) {
+      return { ok: true, replyText: "human_control_active", folio: "HUMAN" };
+    }
+    const controlVersion = this.conversationService.getHumanControlVersion(conversationId);
+    const shouldContinue = async () => {
+      const current = await this.conversationService.getConversation(conversationId);
+      return Boolean(!this.contactService.isDeleting(contactId) && current && current.stage !== ConversationStage.PENDING_HUMAN &&
+        this.conversationService.getHumanControlVersion(conversationId) === controlVersion);
+    };
 
     let contact = await this.contactService.getById(contactId);
     if (!contact) {
@@ -159,11 +178,12 @@ export class AssistantOrchestratorService {
     const acceptedBatch = batch;
     const latestItem = acceptedBatch[acceptedBatch.length - 1];
 
-    const isCompletedFlow = conversation.stage === ConversationStage.COMPLETED;
+    const associatedInquiry = await this.inquiryService.getLatestByConversationId(conversation.id);
+    const isCompletedFlow = conversation.stage === ConversationStage.COMPLETED || associatedInquiry?.status === InquiryStatus.CLOSED;
     let inquiry: Inquiry;
 
     if (isCompletedFlow) {
-      const completedInquiry = await this.inquiryService.getLatestByConversationId(conversation.id);
+      const completedInquiry = associatedInquiry;
       if (!completedInquiry) {
         throw new Error("La conversación completada no tiene un inquiry asociado");
       }
@@ -178,10 +198,11 @@ export class AssistantOrchestratorService {
         throw new Error(openInquiryError ?? "No se pudo preparar inquiry");
       }
 
+      if (!await shouldContinue()) return { ok: true, replyText: "human_control_active", folio: "HUMAN" };
       const openInquiryResult = await this.inquiryService.createOrGetOpen(openInquiryDto);
       inquiry = openInquiryResult.inquiry;
 
-      if (openInquiryResult.created) {
+      if (openInquiryResult.created && await shouldContinue()) {
         await this.notificationService.notifyLeadCreated({
           inquiryId: inquiry.id,
           folio: inquiry.folio,
@@ -191,7 +212,10 @@ export class AssistantOrchestratorService {
       }
     }
 
-    const messages = await this.conversationService.listMessages(conversation.id);
+    const allMessages = await this.conversationService.listMessages(conversation.id);
+    const cutoff = allMessages.findIndex((message) => message.id === latestItem.messageId);
+    if (cutoff < 0) throw new Error("Mensaje del lote no encontrado");
+    const messages = allMessages.slice(0, cutoff + 1);
 
     const contextJson = {
       business: "Conta Magno",
@@ -210,8 +234,7 @@ export class AssistantOrchestratorService {
         intermedio: "$1,200-$1,500",
         premium: "$1,800-$2,500"
       },
-      contribuyenteTypes: CONTRIBUYENTE_TYPE_OPTIONS,
-      lastMessages: messages.slice(-8).map((m) => ({ direction: m.direction, text: m.text, at: m.createdAt.toISOString() }))
+      contribuyenteTypes: CONTRIBUYENTE_TYPE_OPTIONS
     };
 
     const toolContext = {
@@ -222,23 +245,38 @@ export class AssistantOrchestratorService {
       folio: inquiry.folio
     };
 
-    const assistantResult = await this.assistantClient.runAssistant({
-      assistantId: Env.openAiAssistantId,
-      threadId: conversation.assistantThreadId,
-      prompt: contaMagnoAssistantPrompt,
-      contextJson,
-      onToolCall: async (toolCall) => isCompletedFlow
-        ? { ok: false, error: "El inquiry ya está completado y no puede modificarse." }
-        : this.toolRouterService.executeNativeTool(toolCall, toolContext)
-    });
-
-    if (!conversation.assistantThreadId) {
-      conversation = await this.conversationService.setAssistantThreadId(conversation.id, assistantResult.threadId);
+    let assistantResult: Awaited<ReturnType<ResponsesClient["runResponse"]>>;
+    try {
+      const remoteId = await this.responsesClient.syncHistory({
+        conversationId: conversation.openAiConversationId,
+        messages,
+        shouldContinue,
+        onConversationCreated: async (id) => {
+          await this.conversationService.setOpenAiConversationId(conversationId, id);
+        },
+        onMessagesSynced: (ids, at) => this.conversationService.markOpenAiSynced(ids, at)
+      });
+      assistantResult = await this.responsesClient.runResponse({
+        conversationId: remoteId,
+        prompt: contaMagnoAssistantPrompt,
+        contextJson,
+        shouldContinue,
+        onToolCall: async (toolCall) => {
+          if (!await shouldContinue()) throw new AssistantTurnStoppedError();
+          return this.toolRouterService.executeNativeTool(toolCall, toolContext);
+        }
+      });
+    } catch (error) {
+      if (error instanceof AssistantTurnStoppedError) return { ok: true, replyText: "human_control_active", folio: inquiry.folio };
+      throw error;
     }
+    if (!await shouldContinue()) return { ok: true, replyText: "human_control_active", folio: inquiry.folio };
+    const inquiryAfterTools = await this.inquiryService.detail(inquiry.id);
+    const canUpdateInquiry = !isCompletedFlow && inquiryAfterTools?.status !== InquiryStatus.CLOSED;
 
     const extracted = assistantResult.output.extractedFields;
 
-    if (!isCompletedFlow && (extracted.fullName || extracted.email || extracted.phoneWhatsApp)) {
+    if (canUpdateInquiry && await shouldContinue() && (extracted.fullName || extracted.email || extracted.phoneWhatsApp)) {
       const [err, dto] = UpsertContactRequestDTO.validate({
         waId: contact.waId,
         fullName: extracted.fullName ?? contact.fullName,
@@ -251,9 +289,9 @@ export class AssistantOrchestratorService {
       }
     }
 
-    let latestInquiry = inquiry;
+    let latestInquiry = inquiryAfterTools ?? inquiry;
 
-    if (!isCompletedFlow) {
+    if (canUpdateInquiry && await shouldContinue()) {
       const combinedInboundText = acceptedBatch.map((item) => item.incoming.text).join("\n");
       const inferredClientType = extracted.clientType ?? this.inferClientTypeFromMessage(combinedInboundText);
       const [updateFieldsErr, updateFieldsDto] = UpdateInquiryFieldsRequestDTO.validate({
@@ -278,36 +316,21 @@ export class AssistantOrchestratorService {
       Boolean(latestInquiry.mainNeed?.trim()) &&
       Boolean(latestInquiry.recommendedPlan?.trim());
 
-    const toolResults = [...assistantResult.toolResults];
-
-    if (!isCompletedFlow && assistantResult.output.toolCalls && assistantResult.output.toolCalls.length > 0) {
-      const legacyResults = await this.toolRouterService.executeMany(assistantResult.output.toolCalls, toolContext);
-      toolResults.push(...legacyResults);
-    }
-
-    logger.info({ toolResults }, "Assistant tool results");
+    const toolResults = assistantResult.toolResults;
 
     const nextStage = this.conversationService.stageFromString(assistantResult.output.nextStage);
-    if (!isCompletedFlow && nextStage) {
-      const [stageErr, stageDto] = UpdateConversationStageRequestDTO.validate({
-        conversationId: conversation.id,
-        stage: nextStage
-      });
-
-      if (!stageErr && stageDto) {
-        await this.conversationService.updateStage(stageDto);
-      }
-
+    const finalStage = isCompletedFlow || !canUpdateInquiry ? ConversationStage.COMPLETED : nextStage;
+    if (canUpdateInquiry && nextStage && await shouldContinue()) {
       if (nextStage === ConversationStage.COMPLETED) {
         const [statusErr, statusDto] = UpdateInquiryStatusRequestDTO.validate({
           inquiryId: inquiry.id,
           status: InquiryStatus.CLOSED
         });
-        if (!statusErr && statusDto) {
+        if (!statusErr && statusDto && await shouldContinue()) {
           await this.inquiryService.updateStatus(statusDto);
         }
 
-        if (hasOwnerLeadTemplateData) {
+        if (hasOwnerLeadTemplateData && await shouldContinue()) {
           await this.notificationService.notifyOwnerLeadTemplate({
             inquiryId: latestInquiry.id,
             folio: latestInquiry.folio,
@@ -320,7 +343,7 @@ export class AssistantOrchestratorService {
         }
       }
 
-      if (nextStage === ConversationStage.PENDING_HUMAN) {
+      if (nextStage === ConversationStage.PENDING_HUMAN && await shouldContinue()) {
         await this.notificationService.notifyLeadUpdated({
           inquiryId: inquiry.id,
           folio: inquiry.folio,
@@ -329,6 +352,7 @@ export class AssistantOrchestratorService {
       }
     }
 
+    if (!await shouldContinue()) return { ok: true, replyText: "human_control_active", folio: inquiry.folio };
     const replyText = this.sanitizeAssistantReplyText(assistantResult.output.replyText);
     const sent = await latestItem.provider.sendTextMessage(latestItem.incoming.waId, replyText);
 
@@ -336,12 +360,19 @@ export class AssistantOrchestratorService {
       conversationId: conversation.id,
       providerMessageId: sent.providerMessageId,
       text: replyText,
+      openAiSyncedAt: assistantResult.syncedAt,
       rawPayload: {
+        openAiResponseId: assistantResult.responseId,
         provider: latestItem.incoming.provider,
         toolResults,
         batchSize: acceptedBatch.length
       }
     });
+
+    if (finalStage && await shouldContinue()) {
+      const [error, dto] = UpdateConversationStageRequestDTO.validate({ conversationId, stage: finalStage });
+      if (!error && dto) await this.conversationService.updateStage(dto);
+    }
 
     return {
       ok: true,
@@ -396,20 +427,10 @@ export class AssistantOrchestratorService {
     conversationId: string,
     incoming: UnifiedIncomingMessage
   ): Promise<{ ok: boolean; replyText: string; folio: string }> {
-    if (incoming.providerMessageId) {
-      const existing = await this.conversationService.findMessageByProviderMessageId(incoming.providerMessageId);
-      if (existing) {
-        return { ok: true, replyText: "duplicate_ignored", folio: "DUPLICATE" };
-      }
+    const current = await this.conversationService.getConversation(conversationId);
+    if (!current || current.stage === ConversationStage.PENDING_HUMAN) {
+      return { ok: true, replyText: "human_control_active", folio: "HUMAN" };
     }
-
-    await this.conversationService.addInboundMessage({
-      conversationId,
-      providerMessageId: incoming.providerMessageId,
-      text: this.buildUnsupportedInboundText(incoming.messageType),
-      rawPayload: incoming.rawPayload
-    });
-
     const replyText = AssistantOrchestratorService.unsupportedNonTextReply;
     const sent = await provider.sendTextMessage(incoming.waId, replyText);
 
@@ -462,22 +483,6 @@ export class AssistantOrchestratorService {
     }
 
     return undefined;
-  }
-
-  private async storeInboundDuringHumanControl(conversationId:string, incoming:UnifiedIncomingMessage):Promise<void>{
-    if(incoming.providerMessageId){
-      const existing = await this.conversationService.findMessageByProviderMessageId(incoming.providerMessageId)
-      if(existing) return
-    }
-       await this.conversationService.addInboundMessage({
-      conversationId,
-      providerMessageId: incoming.providerMessageId,
-      text: incoming.text,
-      rawPayload: {
-        ...((incoming.rawPayload && typeof incoming.rawPayload === "object") ? incoming.rawPayload : {}),
-        humanControlActive: true
-      }
-    });
   }
 
 }

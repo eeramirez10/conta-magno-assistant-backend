@@ -11,9 +11,7 @@ export class Env {
   public static readonly port: number = Number(process.env.PORT || 4000);
   public static readonly databaseUrl: string = process.env.DATABASE_URL || "";
   public static readonly openAiApiKey: string = process.env.OPENAI_API_KEY || "";
-  public static readonly openAiAssistantId: string = process.env.OPENAI_ASSISTANT_ID || "";
-  public static readonly openAiAssistantName: string = process.env.OPENAI_ASSISTANT_NAME || "Conta Magno AI Advisor";
-  public static readonly openAiAssistantModel: string = process.env.OPENAI_ASSISTANT_MODEL || "gpt-4o-mini";
+  public static readonly openAiModel: string = process.env.OPENAI_MODEL || "gpt-6-luna";
   public static readonly metaWhatsAppToken: string = process.env.META_WHATSAPP_TOKEN || "";
   public static readonly metaWhatsAppPhoneNumberId: string = process.env.META_WHATSAPP_PHONE_NUMBER_ID || "";
   public static readonly metaWebhookVerifyToken: string = process.env.META_WEBHOOK_VERIFY_TOKEN || "";

@@ -8,6 +8,13 @@ type sendTemplatePayload = {
   bodyParameters: string[]
 }
 
+export class MetaWhatsAppTemplateError extends Error {
+  constructor(public readonly status: number, public readonly code: number | undefined, message: string) {
+    super(message);
+    this.name = "MetaWhatsAppTemplateError";
+  }
+}
+
 export class MetaWhatsAppClient {
 
   private readonly endpoint: string = `https://graph.facebook.com/v21.0/${Env.metaWhatsAppPhoneNumberId}/messages`;
@@ -70,12 +77,13 @@ export class MetaWhatsAppClient {
         Authorization: `Bearer ${Env.metaWhatsAppToken}`
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(20_000),
     })
 
-    const data = await response.json() as { messages: Array<{ id: string, }>; error?: { message: string } }
+    const data = await response.json() as { messages: Array<{ id: string, }>; error?: { message: string; code?: number } }
 
     if (!response.ok) {
-      throw new Error(data.error?.message ?? "Error enviando template de WhatsApp");
+      throw new MetaWhatsAppTemplateError(response.status, data.error?.code, data.error?.message ?? "Error enviando template de WhatsApp");
     }
 
     return { id: data.messages?.[0]?.id ?? null };

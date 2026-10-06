@@ -5,18 +5,26 @@ import { ConversationDomainService } from "../../domain/services/ConversationDom
 import { IConversationRepository } from "../../domain/repositories/IConversationRepository.js";
 import { IMessageRepository } from "../../domain/repositories/IMessageRepository.js";
 import { UpdateConversationStageRequestDTO } from "../dtos/request/tools/UpdateConversationStageRequestDTO.js";
+import { IInquiryRepository } from "../../domain/repositories/IInquiryRepository.js";
+import { InquiryStatus } from "../../domain/enums/InquiryStatus.js";
 import { IContactRepository } from "../../domain/repositories/IContactRepository.js";
 import { MetaWhatsAppClient } from '../../infrastructure/integrations/whatsapp/meta/MetaWhatsAppClient.js';
 import { IRealtimePublisher } from '../ports/IRealtimePublisher.js';
 
 export class ConversationApplicationService {
+  private readonly humanControlVersions = new Map<string, number>();
+
+  public getHumanControlVersion(id: string): number {
+    return this.humanControlVersions.get(id) ?? 0;
+  }
   constructor(
     private readonly conversationRepository: IConversationRepository,
     private readonly messageRepository: IMessageRepository,
     private readonly contactRepository: IContactRepository,
     private readonly metaClient: MetaWhatsAppClient,
     private readonly domainService: ConversationDomainService,
-    private readonly realtimePublisher: IRealtimePublisher
+    private readonly realtimePublisher: IRealtimePublisher,
+    private readonly inquiryRepository: IInquiryRepository
   ) { }
 
   public async createOrGetActive(contactId: string, provider: string): Promise<Conversation> {
@@ -36,17 +44,17 @@ export class ConversationApplicationService {
       throw new Error("Conversación no encontrada");
     }
 
-    if (!this.domainService.canMove(current.stage, dto.stage)) {
+    if (current.stage === ConversationStage.PENDING_HUMAN || !this.domainService.canMove(current.stage, dto.stage)) {
       return current;
     }
 
-    const conversation = await this.conversationRepository.updateStage(dto.conversationId, dto.stage);
+    const conversation = await this.conversationRepository.updateStageUnlessHumanControls(dto.conversationId, dto.stage);
     this.realtimePublisher.conversationUpdated(conversation.id);
     return conversation;
   }
 
-  public async setAssistantThreadId(conversationId: string, threadId: string): Promise<Conversation> {
-    return this.conversationRepository.setAssistantThreadId(conversationId, threadId);
+  public async setOpenAiConversationId(conversationId: string, remoteId: string): Promise<Conversation> {
+    return this.conversationRepository.setOpenAiConversationId(conversationId, remoteId);
   }
 
   public async addInboundMessage(payload: {
@@ -54,13 +62,15 @@ export class ConversationApplicationService {
     providerMessageId?: string | null;
     text: string;
     rawPayload: unknown;
+    openAiSyncedAt?: Date;
   }): Promise<Message> {
     const message = await this.messageRepository.create({
       conversationId: payload.conversationId,
       direction: "IN",
       providerMessageId: payload.providerMessageId,
       text: payload.text,
-      rawPayload: payload.rawPayload
+      rawPayload: payload.rawPayload,
+      openAiSyncedAt: payload.openAiSyncedAt
     });
     this.publishMessage(message);
     return message;
@@ -71,16 +81,22 @@ export class ConversationApplicationService {
     providerMessageId?: string | null;
     text: string;
     rawPayload: unknown;
+    openAiSyncedAt?: Date;
   }): Promise<Message> {
     const message = await this.messageRepository.create({
       conversationId: payload.conversationId,
       direction: "OUT",
       providerMessageId: payload.providerMessageId,
       text: payload.text,
-      rawPayload: payload.rawPayload
+      rawPayload: payload.rawPayload,
+      openAiSyncedAt: payload.openAiSyncedAt
     });
     this.publishMessage(message);
     return message;
+  }
+
+  public async markOpenAiSynced(ids: string[], at: Date): Promise<void> {
+    await this.messageRepository.markOpenAiSynced(ids, at);
   }
 
   public async findMessageByProviderMessageId(providerMessageId: string): Promise<Message | null> {
@@ -110,6 +126,7 @@ export class ConversationApplicationService {
       throw new Error('Conversation not found')
     }
 
+    this.humanControlVersions.set(conversationId, this.getHumanControlVersion(conversationId) + 1);
     const updated = await this.conversationRepository
       .updateStage(conversationId, ConversationStage.PENDING_HUMAN);
     this.realtimePublisher.conversationUpdated(updated.id);
@@ -123,8 +140,9 @@ export class ConversationApplicationService {
       throw new Error('Conversation not found')
     }
 
-    const updated = await this.conversationRepository
-      .updateStage(conversationId, ConversationStage.QUALIFYING);
+    const inquiry = await this.inquiryRepository.getLatestByConversationId(conversationId);
+    const stage = inquiry?.status === InquiryStatus.CLOSED ? ConversationStage.COMPLETED : ConversationStage.QUALIFYING;
+    const updated = await this.conversationRepository.updateStage(conversationId, stage);
     this.realtimePublisher.conversationUpdated(updated.id);
     return updated;
   }

@@ -10,6 +10,7 @@ export class Conversation {
     public status: ConversationStatus,
     public stage: ConversationStage,
     public createdAt: Date,
-    public updatedAt: Date
+    public updatedAt: Date,
+    public openAiConversationId: string | null = null
   ) {}
 }

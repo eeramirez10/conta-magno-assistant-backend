@@ -1,12 +1,14 @@
+import OpenAI from "openai";
 import { NextFunction, Request, Response } from "express";
 import { ApiErrorResponseDTO } from "../../../application/dtos/response/common/ApiErrorResponseDTO.js";
 import { logger } from "../../../infrastructure/logging/logger.js";
 
 export function errorHandler(error: unknown, _req: Request, res: Response, _next: NextFunction): void {
-  const message = error instanceof Error ? error.message : "Error interno";
+  const isOpenAiError = error instanceof OpenAI.APIError;
+  const message = isOpenAiError ? "Error de integración OpenAI" : error instanceof Error ? error.message : "Error interno";
   logger.error(
     {
-      err: error,
+      ...(isOpenAiError ? { openAiStatus: error.status, requestId: error.requestID } : { err: error }),
       method: _req.method,
       path: _req.path
     },

@@ -1,0 +1,88 @@
+@baseUrl = http://localhost:4000
+@token = PEGA_AQUI_EL_TOKEN_DEVUELTO_POR_EL_LOGIN
+
+### Consultar configuración (inicialmente desactivada)
+GET {{baseUrl}}/api/settings/incoming-notifications
+Authorization: Bearer {{token}}
+
+### Guardar destinatarios y plantilla antes de la prueba
+# Sustituye el número por el WhatsApp de un miembro de tu equipo.
+# La plantilla debe tener solo dos variables numéricas en el cuerpo: nombre y WhatsApp del contacto.
+PATCH {{baseUrl}}/api/settings/incoming-notifications
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "enabled": false,
+  "recipients": ["+525512345678"],
+  "templateName": "aviso_mensaje_recibido",
+  "languageCode": "es_MX",
+  "templateMode": "INCOMING_MESSAGE"
+}
+
+### Enviar prueba REAL a todos los números guardados
+# Requiere plantilla aprobada en la cuenta Meta configurada.
+# Funciona aunque los avisos estén desactivados. No crea un lead ni usa OpenAI.
+# results[].accepted confirma aceptación por Meta; comprueba recepción en los teléfonos.
+POST {{baseUrl}}/api/settings/incoming-notifications/test
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{}
+
+### Activar avisos después de recibir la prueba
+PATCH {{baseUrl}}/api/settings/incoming-notifications
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "enabled": true,
+  "recipients": ["+525512345678"],
+  "templateName": "aviso_mensaje_recibido",
+  "languageCode": "es_MX",
+  "templateMode": "INCOMING_MESSAGE"
+}
+
+### Validación: activar sin destinatarios devuelve 400
+PATCH {{baseUrl}}/api/settings/incoming-notifications
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "enabled": true,
+  "recipients": [],
+  "templateName": "aviso_mensaje_recibido",
+  "languageCode": "es_MX",
+  "templateMode": "INCOMING_MESSAGE"
+}
+
+### Sin sesión: 401
+GET {{baseUrl}}/api/settings/incoming-notifications
+
+### Reutilizar plantilla actual de solicitudes (seis variables)
+# Usa META_OWNER_LEAD_TEMPLATE_NAME y META_OWNER_LEAD_TEMPLATE_LANG del backend.
+# templateName y languageCode siguientes se conservan solo para el modo de plantilla propia.
+# El primer aviso envía datos pendientes si todavía no existen; comprueba el texto aprobado en Meta.
+PATCH {{baseUrl}}/api/settings/incoming-notifications
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "enabled": true,
+  "recipients": ["+525512345678"],
+  "templateName": "aviso_mensaje_recibido",
+  "languageCode": "es_MX",
+  "templateMode": "OWNER_LEAD"
+}
+
+### Ciclo: calificar por primera vez permite un aviso en el siguiente mensaje
+# Mensajes entrantes A, B y C del mismo contacto => un solo aviso inicial.
+# Marcar QUALIFIED o completar la calificación automática => el siguiente mensaje genera un aviso.
+# Repetir QUALIFIED, pasar a CLOSED y tomar/liberar control NO habilita otro aviso.
+POST {{baseUrl}}/api/inquiries/REEMPLAZA_INQUIRY_ID/status
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "status": "QUALIFIED"
+}

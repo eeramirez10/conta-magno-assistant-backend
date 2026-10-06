@@ -61,6 +61,11 @@ enum AppointmentStatus {
   CANCELLED
 }
 
+enum IncomingNotificationTemplateMode {
+  INCOMING_MESSAGE
+  OWNER_LEAD
+}
+
 model Contact {
   id             String         @id @default(cuid())
   waId           String         @unique
@@ -69,6 +74,8 @@ model Contact {
   email          String?
   timezone       String         @default("America/Mexico_City")
   consentPrivacy Boolean        @default(false)
+  incomingNotificationCycle Int @default(0)
+  incomingNotificationClaimedCycle Int @default(-1)
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   conversations  Conversation[]
@@ -80,6 +87,7 @@ model Conversation {
   contactId         String
   provider          String
   assistantThreadId String?            @unique
+  openAiConversationId String?         @unique
   status            ConversationStatus @default(OPEN)
   stage             ConversationStage  @default(GREETING)
   createdAt         DateTime           @default(now())
@@ -97,9 +105,12 @@ model Message {
   direction         String
   providerMessageId String?
   text              String
+  openAiSyncedAt    DateTime?
+  incomingNotificationCycle Int?
   rawPayload        Json
   createdAt         DateTime     @default(now())
   conversation      Conversation @relation(fields: [conversationId], references: [id])
+  incomingNotifications IncomingMessageNotification[]
 
   @@unique([providerMessageId])
   @@index([conversationId, createdAt])
@@ -118,6 +129,7 @@ model Inquiry {
   budgetRange      String?
   recommendedPlan  String?
   notes            String?
+  incomingNotificationResetAt DateTime?
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
   contact          Contact             @relation(fields: [contactId], references: [id])
@@ -181,4 +193,27 @@ model AdminUser {
   lastLoginAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model IncomingNotificationSettings {
+  id           String   @id @default("incoming-whatsapp")
+  enabled      Boolean  @default(false)
+  recipients   String[] @default([])
+  templateName String   @default("aviso_mensaje_recibido")
+  languageCode String   @default("es_MX")
+  templateMode IncomingNotificationTemplateMode @default(INCOMING_MESSAGE)
+  updatedAt    DateTime @updatedAt
+}
+
+model IncomingMessageNotification {
+  id                String   @id @default(cuid())
+  messageId         String
+  recipient         String
+  status            String   @default("PENDING")
+  providerMessageId String?
+  createdAt         DateTime @default(now())
+  sentAt            DateTime?
+  message           Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, recipient])
 }

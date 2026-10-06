@@ -7,6 +7,8 @@ import { UpdateInquiryFieldsRequestDTO } from "../dtos/request/tools/UpdateInqui
 import { CloseInquiryRequestDTO } from "../dtos/request/tools/CloseInquiryRequestDTO.js";
 import { ListAvailableSlotsRequestDTO } from "../dtos/request/tools/ListAvailableSlotsRequestDTO.js";
 import { CreateTentativeAppointmentRequestDTO } from "../dtos/request/tools/CreateTentativeAppointmentRequestDTO.js";
+import { InquiryStatus } from "../../domain/enums/InquiryStatus.js";
+import { ConversationStage } from "../../domain/enums/ConversationStage.js";
 import { ContribuyenteType } from "../../domain/enums/ContribuyenteType.js";
 import { ContactApplicationService } from "./ContactApplicationService.js";
 import { ConversationApplicationService } from "./ConversationApplicationService.js";
@@ -26,23 +28,26 @@ export class AssistantToolRouterService {
     private readonly notificationService: NotificationApplicationService
   ) {}
 
-  public async executeMany(
-    toolCalls: ToolCallInput[],
-    fallback: { waId: string; contactId?: string; conversationId?: string; inquiryId?: string; folio?: string }
-  ): Promise<Array<Record<string, unknown>>> {
-    const output: Array<Record<string, unknown>> = [];
-
-    for (const toolCall of toolCalls) {
-      output.push(await this.executeOne(toolCall, fallback));
-    }
-
-    return output;
-  }
-
   public async executeNativeTool(
     toolCall: ToolCallInput,
     fallback: { waId: string; contactId?: string; conversationId?: string; inquiryId?: string; folio?: string }
   ): Promise<Record<string, unknown>> {
+    if (fallback.conversationId) {
+      const conversation = await this.conversationService.getConversation(fallback.conversationId);
+      if (!conversation || conversation.stage === ConversationStage.PENDING_HUMAN) {
+        return { ok: false, error: "Control humano activo" };
+      }
+      const inquiry = await this.inquiryService.getLatestByConversationId(fallback.conversationId);
+      if (inquiry?.status === InquiryStatus.CLOSED && !["getContactByWaId", "getActiveConversation", "listAvailableSlots"].includes(toolCall.name)) {
+        return { ok: false, error: "El inquiry está cerrado y no puede modificarse." };
+      }
+    }
+    // Keep native tool calls scoped to the conversation that initiated the turn.
+    for (const key of ["waId", "contactId", "conversationId", "inquiryId"] as const) {
+      if (toolCall.arguments[key] !== undefined && toolCall.arguments[key] !== fallback[key]) {
+        return { ok: false, error: "La función debe usar los IDs del contexto actual." };
+      }
+    }
     return this.executeOne(toolCall, fallback);
   }
 

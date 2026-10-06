@@ -51,11 +51,11 @@ Content-Type: application/json
 GET {{baseUrl}}/api/conversations/{{conversationId}}
 
 ### 7. Release human control
-# Expected: 200 and data.stage = "QUALIFYING"
+# Expected: 200 and data.stage = "COMPLETED" for a closed inquiry, otherwise "QUALIFYING"
 POST {{baseUrl}}/api/conversations/{{conversationId}}/release-control
 
 ### 8. Verify assistant control is active again
-# Expected: stage = "QUALIFYING"
+# Expected: stage = "COMPLETED" for a closed inquiry, otherwise "QUALIFYING"
 GET {{baseUrl}}/api/conversations/{{conversationId}}
 
 ### 9. Verify sending without human control is rejected
@@ -75,3 +75,10 @@ Content-Type: application/json
 {
   "text": ""
 }
+
+### 11. Respuestas después de completar el inquiry
+# Completa un flujo mediante el webhook del proveedor y copia su conversationId.
+# Envía otra duda con un providerMessageId nuevo: debe responder sin crear otro
+# inquiry ni repetir OWNER_LEAD_TEMPLATE_SENT. Toma/libera control y repite:
+# release-control debe conservar COMPLETED. Revisa los mensajes en el panel.
+GET {{baseUrl}}/api/conversations/{{conversationId}}

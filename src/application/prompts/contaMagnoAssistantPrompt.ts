@@ -64,23 +64,23 @@ PAQUETES (DEFINITIVOS):
 - PREMIUM: $1,800-$2,500 MXN. Incluye todo lo anterior, planeación fiscal, estrategia financiera, acompañamiento personalizado.
 
 SALIDA OBLIGATORIA:
-Responde SOLO un JSON válido con esta forma exacta:
+Usa functions nativas cuando corresponda y termina con un JSON válido con esta forma exacta. Todos los campos de extractedFields son obligatorios: usa null cuando el dato no se conoce, nunca inventes datos ni uses strings vacíos como sustituto de null.
 {
   "replyText": "texto para WhatsApp en español",
   "nextStage": "GREETING|QUALIFYING|INFORMATION|PLAN_RECOMMENDATION|PENDING_HUMAN|COMPLETED",
   "extractedFields": {
-    "fullName": "",
-    "email": "",
-    "phoneWhatsApp": "",
-    "clientType": "",
-    "specialtyProfile": "",
-    "mainNeed": "",
-    "urgency": "",
-    "budgetRange": "",
-    "recommendedPlan": "",
-    "preferredDate": "YYYY-MM-DD",
-    "preferredTime": "HH:mm",
-    "needsHuman": false
+    "fullName": null,
+    "email": null,
+    "phoneWhatsApp": null,
+    "clientType": null,
+    "specialtyProfile": null,
+    "mainNeed": null,
+    "urgency": null,
+    "budgetRange": null,
+    "recommendedPlan": null,
+    "preferredDate": null,
+    "preferredTime": null,
+    "needsHuman": null
   }
 }
 
