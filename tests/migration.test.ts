@@ -70,13 +70,19 @@ test("additive migrations preserve history and persist notification settings wit
       const { PrismaIncomingNotificationRepository } = await import("../src/infrastructure/repositories/PrismaIncomingNotificationRepository.js");
       const notificationRepo = new PrismaIncomingNotificationRepository();
       const defaults = await notificationRepo.getSettings();
-      assert.equal(defaults.enabled, false);
-      const settings = { ...defaults, enabled: true, recipients: ["525511111111"] };
+      assert.deepEqual(defaults, { recipients: [] });
+      const settings = { recipients: ["525511111111"] };
       await notificationRepo.saveSettings(settings);
       assert.deepEqual(await notificationRepo.getSettings(), settings);
+      await prisma.incomingNotificationSettings.update({ where: { id: "incoming-whatsapp" }, data: {
+        enabled: false, templateMode: "OWNER_LEAD", templateName: "legacy_template", languageCode: "en"
+      } });
+      assert.deepEqual(await notificationRepo.getSettings(), settings);
+      await notificationRepo.saveSettings(settings);
+      assert.equal((await prisma.incomingNotificationSettings.findUniqueOrThrow({ where: { id: "incoming-whatsapp" } })).enabled, true);
       assert.equal((await prisma.contact.findUniqueOrThrow({ where: { id: "legacy_contact" } })).incomingNotificationClaimedCycle, 0);
       assert.ok((await prisma.inquiry.findUniqueOrThrow({ where: { id: "legacy_inquiry" } })).incomingNotificationResetAt);
-      assert.equal(await notificationRepo.claimCycleForMessage(message.id), null);
+      assert.equal(await notificationRepo.claimCycleForMessage(message.id), false);
       const claims = await Promise.all([notificationRepo.claimDelivery(message.id, "525511111111"), notificationRepo.claimDelivery(message.id, "525511111111")]);
       assert.equal(claims.filter(Boolean).length, 1);
       await notificationRepo.markSent(claims.find(Boolean)!, "wamid_accepted");
@@ -90,12 +96,12 @@ test("additive migrations preserve history and persist notification settings wit
       await inquiryRepo.updateStatus(next.id, InquiryStatus.QUALIFIED);
       assert.equal((await prisma.contact.findUniqueOrThrow({ where: { id: "legacy_contact" } })).incomingNotificationCycle, 1);
       // Delayed old messages cannot consume the rearmed cycle.
-      assert.equal(await notificationRepo.claimCycleForMessage(before.id), null);
+      assert.equal(await notificationRepo.claimCycleForMessage(before.id), false);
       const first = await messageRepo.create({ conversationId: conversation.id, direction: "IN", providerMessageId: "first_followup", text: "Followup", rawPayload: {} });
       const second = await messageRepo.create({ conversationId: conversation.id, direction: "IN", providerMessageId: "second_followup", text: "Another message", rawPayload: {} });
       const cycleClaims = await Promise.all([notificationRepo.claimCycleForMessage(first.id), notificationRepo.claimCycleForMessage(second.id)]);
       assert.equal(cycleClaims.filter(Boolean).length, 1);
-      assert.equal(await new PrismaIncomingNotificationRepository().claimCycleForMessage(second.id), null);
+      assert.equal(await new PrismaIncomingNotificationRepository().claimCycleForMessage(second.id), false);
       await inquiryRepo.updateStatus(next.id, InquiryStatus.QUALIFIED);
       await inquiryRepo.updateStatus(next.id, InquiryStatus.CLOSED);
       assert.equal((await prisma.contact.findUniqueOrThrow({ where: { id: "legacy_contact" } })).incomingNotificationCycle, 1);
@@ -104,7 +110,7 @@ test("additive migrations preserve history and persist notification settings wit
       assert.equal((await prisma.contact.findUniqueOrThrow({ where: { id: "legacy_contact" } })).incomingNotificationCycle, 2);
       const afterAutomatic = await messageRepo.create({ conversationId: conversation.id, direction: "IN", text: "After automatic completion", rawPayload: {} });
       assert.ok(await notificationRepo.claimCycleForMessage(afterAutomatic.id));
-      assert.equal(await notificationRepo.claimCycleForMessage(afterAutomatic.id), null);
+      assert.equal(await notificationRepo.claimCycleForMessage(afterAutomatic.id), false);
       await prisma.contact.create({ data: { id: "independent_contact", waId: "525566666666", fullName: "Otro contacto", phoneE164: "+525566666666" } });
       const independent = await prisma.conversation.create({ data: { contactId: "independent_contact", provider: "META" } });
       const independentMessage = await messageRepo.create({ conversationId: independent.id, direction: "IN", text: "Independent contact", rawPayload: {} });
@@ -113,6 +119,9 @@ test("additive migrations preserve history and persist notification settings wit
       await new PrismaContactRepository().deleteWithRelations("legacy_contact");
       assert.equal(await prisma.incomingMessageNotification.count(), 0);
       assert.deepEqual(await notificationRepo.getSettings(), settings);
+      await notificationRepo.saveSettings({ recipients: [] });
+      assert.deepEqual(await notificationRepo.getSettings(), { recipients: [] });
+      assert.equal((await prisma.incomingNotificationSettings.findUniqueOrThrow({ where: { id: "incoming-whatsapp" } })).enabled, false);
     } finally { await repositoryClient.$disconnect(); }
 
   } finally {

@@ -15,6 +15,8 @@ export class Env {
   public static readonly metaWhatsAppToken: string = process.env.META_WHATSAPP_TOKEN || "";
   public static readonly metaWhatsAppPhoneNumberId: string = process.env.META_WHATSAPP_PHONE_NUMBER_ID || "";
   public static readonly metaWebhookVerifyToken: string = process.env.META_WEBHOOK_VERIFY_TOKEN || "";
+  public static readonly metaIncomingMessageTemplateName: string = process.env.META_INCOMING_MESSAGE_TEMPLATE_NAME || "nombre_aviso_mensaje_recibido";
+  public static readonly metaIncomingMessageTemplateLang: string = process.env.META_INCOMING_MESSAGE_TEMPLATE_LANG || "es_MX";
   public static readonly twilioAccountSid: string = process.env.TWILIO_ACCOUNT_SID || "";
   public static readonly twilioAuthToken: string = process.env.TWILIO_AUTH_TOKEN || "";
   public static readonly authJwtSecret: string = process.env.AUTH_JWT_SECRET || "";

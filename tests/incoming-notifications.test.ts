@@ -18,8 +18,7 @@ function notificationsFixture() {
   let cycle = 0;
   let claimedCycle = -1;
   const messageCycles = new Map<string, number>();
-  const lead = { folio: null as string | null, fullName: "María Pérez", phoneE164: "+525533333333", email: null as string | null, mainNeed: null as string | null, recommendedPlan: null as string | null };
-  let ownerTemplate: { name: string; languageCode: string } | null = { name: "nuevo_inquiry_conta_magno", languageCode: "en" };
+  let template = { name: "nombre_aviso_mensaje_recibido", languageCode: "es_MX" };
   let send: (payload: any) => Promise<{ id: string | null }> = async () => ({ id: "wamid_test" });
   const repository: IIncomingNotificationRepository = {
     getSettings: async () => settings,
@@ -27,9 +26,9 @@ function notificationsFixture() {
     claimCycleForMessage: async (messageId) => {
       const messageCycle = messageCycles.get(messageId) ?? cycle;
       messageCycles.set(messageId, messageCycle);
-      if (messageCycle !== cycle || claimedCycle === cycle) return null;
+      if (messageCycle !== cycle || claimedCycle === cycle) return false;
       claimedCycle = cycle;
-      return { ...lead };
+      return true;
     },
     claimDelivery: async (messageId, recipient) => {
       const key = `${messageId}:${recipient}`;
@@ -41,11 +40,11 @@ function notificationsFixture() {
     markFailed: async (id) => { deliveries.get(id)!.status = "FAILED"; }
   };
   const metaClient = { sendTemplate: async (payload: any) => { sent.push(payload); return send(payload); } };
-  const service = new IncomingNotificationApplicationService(repository, metaClient, () => configured, () => ownerTemplate);
-  const activate = () => service.saveSettings({ ...defaultIncomingNotificationSettings, enabled: true, recipients: ["525511111111", "525522222222"] });
-  return { service, repository, activate, deliveries, sent, metaClient, lead,
+  const service = new IncomingNotificationApplicationService(repository, metaClient, () => configured, () => template);
+  const activate = () => service.saveSettings({ recipients: ["525511111111", "525522222222"] });
+  return { service, repository, activate, deliveries, sent, metaClient,
     resetCycle: () => { cycle++; }, recordMessage: (id: string) => { messageCycles.set(id, cycle); },
-    setOwnerTemplate: (value: typeof ownerTemplate) => { ownerTemplate = value; },
+    setTemplate: (value: typeof template) => { template = value; },
     setSend: (fn: typeof send) => { send = fn; }, setConfigured: (value: boolean) => { configured = value; } };
 }
 
@@ -53,7 +52,7 @@ const message = { messageId: "message_test", senderWaId: "525533333333", senderN
 
 test("incoming notifications are disabled by default and retain a saved configuration", async () => {
   const f = notificationsFixture();
-  assert.equal((await f.service.getSettings()).enabled, false);
+  assert.deepEqual(await f.service.getSettings(), { recipients: [] });
   await f.service.notifyMessage(message);
   assert.equal(f.sent.length, 0);
   await f.activate();
@@ -66,7 +65,7 @@ test("concurrent delivery attempts notify each recipient only once and use the t
   assert.equal(f.sent.length, 2);
   assert.deepEqual(f.sent.map((item) => item.toWaId), ["525511111111", "525522222222"]);
   assert.deepEqual(f.sent[0].bodyParameters, ["María Pérez", "+525533333333"]);
-  assert.equal(f.sent[0].templateName, "aviso_mensaje_recibido");
+  assert.equal(f.sent[0].templateName, "nombre_aviso_mensaje_recibido");
   assert.ok([...f.deliveries.values()].every((delivery) => delivery.status === "SENT"));
 });
 
@@ -92,14 +91,15 @@ test("recipient matching the sender is excluded, including legacy Mexico numbers
   assert.deepEqual(f.sent.map((item) => item.toWaId), ["525522222222"]);
 });
 
-test("a saved disabled configuration can be tested without creating leads or message delivery records", async () => {
+test("saved numbers can be tested without consuming the notification cycle or creating delivery records", async () => {
   const f = notificationsFixture(); await f.activate();
-  await f.service.saveSettings({ ...await f.service.getSettings(), enabled: false });
   f.setSend(async (payload) => { if (payload.toWaId === "525511111111") throw new Error("template missing"); return { id: "wamid_test" }; });
   const results = await f.service.testSavedSettings();
   assert.deepEqual(results.map((result) => result.accepted), [false, true]);
   assert.equal(f.deliveries.size, 0);
   assert.deepEqual(f.sent[0].bodyParameters, ["Contacto de prueba", "+525555555555"]);
+  assert.equal(f.sent[0].templateName, "nombre_aviso_mensaje_recibido");
+  await f.service.notifyMessage(message); assert.equal(f.sent.length, 4);
 });
 
 test("repository errors are contained so the assistant can continue", async () => {
@@ -127,7 +127,7 @@ test("Meta requests use positional body parameters and a timeout, and expose rej
   };
   try {
     const client = new MetaWhatsAppClient();
-    const payload = { toWaId: "525511111111", templateName: "aviso_mensaje_recibido", languageCode: "es_MX", bodyParameters: ["María Pérez", "+525533333333"] };
+    const payload = { toWaId: "525511111111", templateName: "nombre_aviso_mensaje_recibido", languageCode: "es_MX", bodyParameters: ["María Pérez", "+525533333333"] };
     assert.equal((await client.sendTemplate(payload)).id, "wamid_mock");
     assert.deepEqual(bodies[0].template.components, [{ type: "body", parameters: [{ type: "text", text: "María Pérez" }, { type: "text", text: "+525533333333" }] }]);
     await assert.rejects(client.sendTemplate(payload), (error: unknown) => error instanceof MetaWhatsAppTemplateError && error.code === 132001 && error.status === 400);
@@ -135,14 +135,16 @@ test("Meta requests use positional body parameters and a timeout, and expose rej
 });
 
 test("settings reject malformed numbers, missing recipients and excessive recipients; equivalent numbers are deduplicated", () => {
-  const valid = { enabled: true, recipients: ["+52 (55) 1111-1111", "525511111111", "00525511111111"], templateName: "aviso_mensaje_recibido", languageCode: "es_MX" };
+  const valid = { recipients: ["+52 (55) 1111-1111", "525511111111", "00525511111111"] };
   const [error, settings] = IncomingNotificationSettingsRequestDTO.validate(valid);
   assert.equal(error, undefined); assert.deepEqual(settings?.recipients, ["525511111111"]);
   for (const patch of [
-    { enabled: "true" }, { recipients: [] }, { recipients: ["email@example.com"] },
-    { recipients: ["555"] }, { recipients: Array(11).fill("525511111111") },
-    { templateName: "Wrong Name" }, { languageCode: "Español" }, { templateMode: "UNKNOWN" }
+    { recipients: undefined }, { recipients: "525511111111" }, { recipients: ["email@example.com"] },
+    { recipients: ["555"] }, { recipients: Array(11).fill("525511111111") }
   ]) assert.ok(IncomingNotificationSettingsRequestDTO.validate({ ...valid, ...patch })[0]);
+  assert.deepEqual(IncomingNotificationSettingsRequestDTO.validate({ recipients: [] })[1], { recipients: [] });
+  // Old clients cannot override the server's approved template or activation policy.
+  assert.deepEqual(IncomingNotificationSettingsRequestDTO.validate({ ...valid, enabled: false, templateMode: "OWNER_LEAD", templateName: "legacy", languageCode: "en" })[1], { recipients: ["525511111111"] });
 });
 
 test("administrative settings and real test sends require authentication and validation", async () => {
@@ -161,18 +163,20 @@ test("administrative settings and real test sends require authentication and val
       assert.equal(response.status, 401);
     }
     const get = await fetch(endpoint, { headers }); const initial = await get.json() as any;
-    assert.equal(initial.data.enabled, false); assert.equal(initial.ownerLeadTemplate.name, "nuevo_inquiry_conta_magno");
-    const invalid = await fetch(endpoint, { method: "PATCH", headers, body: JSON.stringify({ enabled: true, recipients: [] }) });
+    assert.deepEqual(initial, { data: { recipients: [] }, metaConfigured: true });
+    const invalid = await fetch(endpoint, { method: "PATCH", headers, body: JSON.stringify({ recipients: "not-a-list" }) });
     assert.equal(invalid.status, 400);
     const saved = await fetch(endpoint, { method: "PATCH", headers, body: JSON.stringify({ ...defaultIncomingNotificationSettings, recipients: ["+525511111111"] }) });
     assert.equal(saved.status, 200); assert.deepEqual((await saved.json() as any).data.recipients, ["525511111111"]);
     const tested = await fetch(`${endpoint}/test`, { method: "POST", headers });
     assert.equal(tested.status, 200); assert.equal((await tested.json() as any).results[0].accepted, true);
-    f.setOwnerTemplate(null);
-    assert.equal((await fetch(endpoint, { method: "PATCH", headers, body: JSON.stringify({ ...await f.service.getSettings(), enabled: true, templateMode: "OWNER_LEAD" }) })).status, 400);
-    assert.equal((await fetch(endpoint, { method: "PATCH", headers, body: JSON.stringify({ ...await f.service.getSettings(), enabled: false, templateMode: "OWNER_LEAD" }) })).status, 200);
     f.setConfigured(false);
-    assert.equal((await fetch(endpoint, { method: "PATCH", headers, body: JSON.stringify({ ...await f.service.getSettings(), enabled: true }) })).status, 400);
+    assert.equal((await fetch(endpoint, { method: "PATCH", headers, body: JSON.stringify({ recipients: ["+525522222222"] }) })).status, 200);
+    assert.equal((await fetch(`${endpoint}/test`, { method: "POST", headers })).status, 400);
+    const cleared = await fetch(endpoint, { method: "PATCH", headers, body: JSON.stringify({ recipients: [] }) });
+    assert.equal(cleared.status, 200); assert.deepEqual((await cleared.json() as any).data, { recipients: [] });
+    f.setConfigured(true);
+    assert.equal((await fetch(`${endpoint}/test`, { method: "POST", headers })).status, 400);
   } finally { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
 });
 
@@ -221,31 +225,32 @@ test("delayed messages from before qualification cannot consume the next cycle",
 
 test("disabling and reenabling alerts does not reset the contact cycle", async () => {
   const f = notificationsFixture(); await f.activate(); await f.service.notifyMessage(message);
-  await f.service.saveSettings({ ...await f.service.getSettings(), enabled: false });
+  await f.service.saveSettings({ recipients: [] });
   await f.service.notifyMessage({ ...message, messageId: "while_disabled" });
-  await f.service.saveSettings({ ...await f.service.getSettings(), enabled: true });
+  await f.activate();
   await f.service.notifyMessage({ ...message, messageId: "after_reenabling" });
   assert.equal(f.sent.length, 2);
 });
 
-test("existing prospect template uses its configured name and language with six ordered parameters and pending fields", async () => {
+test("legacy prospect-template settings are ignored and notifications always use the approved incoming-message template", async () => {
   const f = notificationsFixture(); await f.activate();
-  await f.service.saveSettings({ ...await f.service.getSettings(), templateMode: "OWNER_LEAD" });
+  const recipients = (await f.service.getSettings()).recipients;
+  f.repository.getSettings = async () => ({ recipients, enabled: false, templateMode: "OWNER_LEAD", templateName: "legacy_template", languageCode: "en" } as any);
   await f.service.notifyMessage(message);
-  assert.equal(f.sent[0].templateName, "nuevo_inquiry_conta_magno"); assert.equal(f.sent[0].languageCode, "en");
-  assert.deepEqual(f.sent[0].bodyParameters, ["Primer contacto", "María Pérez", "+525533333333", "Pendiente", "Pendiente", "Pendiente"]);
-  f.resetCycle(); Object.assign(f.lead, { folio: "CM-TEST", email: "prueba@example.com", mainNeed: "Asesoría", recommendedPlan: "Básico" });
-  await f.service.notifyMessage({ ...message, messageId: "qualified_followup" });
-  assert.deepEqual(f.sent[2].bodyParameters, ["CM-TEST", "María Pérez", "+525533333333", "prueba@example.com", "Asesoría", "Básico"]);
+  assert.equal(f.sent[0].templateName, "nombre_aviso_mensaje_recibido"); assert.equal(f.sent[0].languageCode, "es_MX");
+  assert.deepEqual(f.sent[0].bodyParameters, ["María Pérez", "+525533333333"]);
 });
 
-test("a prospect-template test uses six parameters without consuming a real cycle", async () => {
-  const f = notificationsFixture(); await f.activate(); await f.service.saveSettings({ ...await f.service.getSettings(), templateMode: "OWNER_LEAD" });
-  await f.service.testSavedSettings();
-  assert.deepEqual(f.sent[0].bodyParameters, ["Primer contacto", "Contacto de prueba", "+525555555555", "Pendiente", "Pendiente", "Pendiente"]);
-  await f.service.notifyMessage(message); assert.equal(f.sent.length, 4);
-  f.setOwnerTemplate(null); f.resetCycle();
-  await f.service.notifyMessage({ ...message, messageId: "missing_template" }); assert.equal(f.sent.length, 4);
+test("invalid template environment configuration does not consume a cycle and its configured language is used for tests and alerts", async () => {
+  const f = notificationsFixture(); await f.activate();
+  f.setTemplate({ name: "invalid template", languageCode: "Español" });
+  assert.equal(f.service.canSend(), false);
+  await f.service.notifyMessage(message); assert.equal(f.sent.length, 0);
+  await assert.rejects(f.service.testSavedSettings());
+  f.setTemplate({ name: "nombre_aviso_mensaje_recibido", languageCode: "es" });
+  await f.service.testSavedSettings(); await f.service.notifyMessage(message);
+  assert.equal(f.sent.length, 4);
+  assert.ok(f.sent.every((payload) => payload.languageCode === "es" && payload.bodyParameters.length === 2));
 });
 
 test("a duplicate insert race never starts a second alert or assistant turn", async () => {

@@ -1,4 +1,4 @@
-import { IIncomingNotificationRepository, IncomingNotificationSettings, IncomingLeadTemplateData } from "../../domain/repositories/IIncomingNotificationRepository.js";
+import { IIncomingNotificationRepository, IncomingNotificationSettings } from "../../domain/repositories/IIncomingNotificationRepository.js";
 import { Env } from "../../infrastructure/config/env.js";
 import { MetaWhatsAppClient, MetaWhatsAppTemplateError } from "../../infrastructure/integrations/whatsapp/meta/MetaWhatsAppClient.js";
 import { logger } from "../../infrastructure/logging/logger.js";
@@ -6,42 +6,42 @@ import { normalizeNotificationPhone } from "../dtos/request/notifications/Incomi
 
 export type IncomingNotificationPayload = { messageId: string; senderWaId: string; senderName: string };
 export type NotificationTestResult = { recipient: string; accepted: boolean; error?: string };
-export type OwnerLeadTemplate = { name: string; languageCode: string };
+export type IncomingMessageTemplate = { name: string; languageCode: string };
 
 export class IncomingNotificationApplicationService {
   constructor(
     private readonly repository: IIncomingNotificationRepository,
     private readonly metaClient: Pick<MetaWhatsAppClient, "sendTemplate">,
     private readonly isMetaConfigured: () => boolean = () => Boolean(Env.metaWhatsAppToken && Env.metaWhatsAppPhoneNumberId),
-    private readonly ownerLeadTemplate: () => OwnerLeadTemplate | null = () => Env.metaOwnerLeadTemplateName
-      ? { name: Env.metaOwnerLeadTemplateName, languageCode: Env.metaOwnerLeadTemplateLang } : null
+    private readonly incomingMessageTemplate: () => IncomingMessageTemplate = () => ({
+      name: Env.metaIncomingMessageTemplateName, languageCode: Env.metaIncomingMessageTemplateLang
+    })
   ) {}
 
   public getSettings(): Promise<IncomingNotificationSettings> { return this.repository.getSettings(); }
   public saveSettings(settings: IncomingNotificationSettings): Promise<IncomingNotificationSettings> { return this.repository.saveSettings(settings); }
-  public canSend(): boolean { return this.isMetaConfigured(); }
-  public getOwnerLeadTemplate(): OwnerLeadTemplate | null { return this.ownerLeadTemplate(); }
+  public canSend(): boolean {
+    const template = this.incomingMessageTemplate();
+    return this.isMetaConfigured() && /^[a-z0-9_]{1,512}$/.test(template.name) && /^[a-z]{2,3}(?:_[A-Z]{2})?$/.test(template.languageCode);
+  }
 
   public async notifyMessage(payload: IncomingNotificationPayload): Promise<void> {
     // Notification failures must never interrupt storage, human attention or the assistant.
     try {
       const settings = await this.getSettings();
-      if (!settings.enabled) return;
+      if (!settings.recipients.length) return;
       if (!this.canSend()) throw new Error("Meta WhatsApp no está configurado");
       const sender = normalizeNotificationPhone(payload.senderWaId);
       const recipients = settings.recipients.filter((recipient) => recipient !== sender);
       if (!recipients.length) return;
-      if (settings.templateMode === "OWNER_LEAD" && !this.getOwnerLeadTemplate()) throw new Error("La plantilla de solicitudes no está configurada");
-      const lead = await this.repository.claimCycleForMessage(payload.messageId);
-      if (!lead) return;
-      const bodyParameters = settings.templateMode === "OWNER_LEAD" ? this.leadParameters(lead)
-        : [this.templateValue(payload.senderName, "Contacto de WhatsApp"), `+${sender}`];
+      if (!await this.repository.claimCycleForMessage(payload.messageId)) return;
+      const bodyParameters = [this.templateValue(payload.senderName, "Contacto de WhatsApp"), `+${sender}`];
       const results = await Promise.allSettled(recipients.map(async (recipient) => {
         const deliveryId = await this.repository.claimDelivery(payload.messageId, recipient);
         if (!deliveryId) return;
         let providerMessageId: string;
         try {
-          providerMessageId = await this.send(settings, recipient, bodyParameters);
+          providerMessageId = await this.send(recipient, bodyParameters);
         } catch (error) {
           await this.repository.markFailed(deliveryId);
           logger.warn({ messageId: payload.messageId, deliveryId, errorType: error instanceof Error ? error.name : "Unknown",
@@ -62,14 +62,11 @@ export class IncomingNotificationApplicationService {
 
   public async testSavedSettings(): Promise<NotificationTestResult[]> {
     const settings = await this.getSettings();
-    if (!this.canSend()) throw new Error("Configura META_WHATSAPP_TOKEN y META_WHATSAPP_PHONE_NUMBER_ID en el backend");
+    if (!this.canSend()) throw new Error("Revisa las credenciales de Meta y las variables META_INCOMING_MESSAGE_TEMPLATE_NAME y META_INCOMING_MESSAGE_TEMPLATE_LANG en el backend");
     if (!settings.recipients.length) throw new Error("Guarda al menos un número destinatario antes de enviar la prueba");
     return Promise.all(settings.recipients.map(async (recipient) => {
       try {
-        const bodyParameters = settings.templateMode === "OWNER_LEAD"
-          ? this.leadParameters({ folio: null, fullName: "Contacto de prueba", phoneE164: "+525555555555", email: null, mainNeed: null, recommendedPlan: null })
-          : ["Contacto de prueba", "+525555555555"];
-        await this.send(settings, recipient, bodyParameters);
+        await this.send(recipient, ["Contacto de prueba", "+525555555555"]);
         return { recipient, accepted: true };
       } catch (error) {
         const code = error instanceof MetaWhatsAppTemplateError && error.code ? ` (código ${error.code})` : "";
@@ -78,19 +75,12 @@ export class IncomingNotificationApplicationService {
     }));
   }
 
-  private async send(settings: IncomingNotificationSettings, recipient: string, bodyParameters: string[]): Promise<string> {
-    const ownerTemplate = settings.templateMode === "OWNER_LEAD" ? this.getOwnerLeadTemplate() : null;
-    if (settings.templateMode === "OWNER_LEAD" && !ownerTemplate) throw new Error("La plantilla de solicitudes no está configurada");
-    const sent = await this.metaClient.sendTemplate({ toWaId: recipient, templateName: ownerTemplate?.name ?? settings.templateName,
-      languageCode: ownerTemplate?.languageCode ?? settings.languageCode, bodyParameters });
+  private async send(recipient: string, bodyParameters: string[]): Promise<string> {
+    const template = this.incomingMessageTemplate();
+    const sent = await this.metaClient.sendTemplate({ toWaId: recipient, templateName: template.name,
+      languageCode: template.languageCode, bodyParameters });
     if (!sent.id) throw new Error("Meta no devolvió un ID de mensaje");
     return sent.id;
-  }
-
-  private leadParameters(lead: IncomingLeadTemplateData): string[] {
-    return [this.templateValue(lead.folio ?? "", "Primer contacto"), this.templateValue(lead.fullName, "Contacto de WhatsApp"),
-      this.templateValue(lead.phoneE164, "Pendiente"), this.templateValue(lead.email ?? "", "Pendiente"),
-      this.templateValue(lead.mainNeed ?? "", "Pendiente"), this.templateValue(lead.recommendedPlan ?? "", "Pendiente")];
   }
 
   private templateValue(value: string, fallback: string): string {

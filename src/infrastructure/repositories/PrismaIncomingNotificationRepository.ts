@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { defaultIncomingNotificationSettings, IIncomingNotificationRepository, IncomingNotificationSettings, IncomingLeadTemplateData } from "../../domain/repositories/IIncomingNotificationRepository.js";
+import { defaultIncomingNotificationSettings, IIncomingNotificationRepository, IncomingNotificationSettings } from "../../domain/repositories/IIncomingNotificationRepository.js";
 import { prisma } from "../database/prisma.js";
 
 export class PrismaIncomingNotificationRepository implements IIncomingNotificationRepository {
@@ -13,8 +13,8 @@ export class PrismaIncomingNotificationRepository implements IIncomingNotificati
   public async saveSettings(settings: IncomingNotificationSettings): Promise<IncomingNotificationSettings> {
     const row = await prisma.incomingNotificationSettings.upsert({
       where: { id: this.settingsId },
-      create: { id: this.settingsId, ...settings },
-      update: settings
+      create: { id: this.settingsId, recipients: settings.recipients, enabled: settings.recipients.length > 0 },
+      update: { recipients: settings.recipients, enabled: settings.recipients.length > 0 }
     });
     return this.toSettings(row);
   }
@@ -29,28 +29,21 @@ export class PrismaIncomingNotificationRepository implements IIncomingNotificati
     }
   }
 
-  public async claimCycleForMessage(messageId: string): Promise<IncomingLeadTemplateData | null> {
+  public async claimCycleForMessage(messageId: string): Promise<boolean> {
     return prisma.$transaction(async (transaction) => {
       const message = await transaction.message.findUniqueOrThrow({
         where: { id: messageId },
-        include: { conversation: { include: {
-          contact: true,
-          inquiries: { take: 1, orderBy: [{ createdAt: "desc" }, { id: "desc" }] }
-        } } }
+        select: { direction: true, incomingNotificationCycle: true, conversation: { select: { contactId: true } } }
       });
-      if (message.direction !== "IN" || message.incomingNotificationCycle === null) return null;
-      const contact = message.conversation.contact;
+      if (message.direction !== "IN" || message.incomingNotificationCycle === null) return false;
       const cycle = message.incomingNotificationCycle;
       // The message carries its ingestion cycle. Delayed old work cannot consume
       // the next cycle after qualification, and concurrent messages claim once.
       const claimed = await transaction.contact.updateMany({
-        where: { id: contact.id, incomingNotificationCycle: cycle, incomingNotificationClaimedCycle: { not: cycle } },
+        where: { id: message.conversation.contactId, incomingNotificationCycle: cycle, incomingNotificationClaimedCycle: { not: cycle } },
         data: { incomingNotificationClaimedCycle: cycle }
       });
-      if (!claimed.count) return null;
-      const inquiry = message.conversation.inquiries[0];
-      return { folio: inquiry?.folio ?? null, fullName: contact.fullName, phoneE164: contact.phoneE164,
-        email: contact.email, mainNeed: inquiry?.mainNeed ?? null, recommendedPlan: inquiry?.recommendedPlan ?? null };
+      return claimed.count > 0;
     });
   }
 
@@ -63,6 +56,6 @@ export class PrismaIncomingNotificationRepository implements IIncomingNotificati
   }
 
   private toSettings(row: IncomingNotificationSettings): IncomingNotificationSettings {
-    return { enabled: row.enabled, recipients: row.recipients, templateName: row.templateName, languageCode: row.languageCode, templateMode: row.templateMode };
+    return { recipients: row.recipients };
   }
 }

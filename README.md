@@ -60,39 +60,30 @@ La cola y las comprobaciones de control operan en una sola instancia del backend
 
 ## Avisos de mensajes entrantes por WhatsApp
 
-El panel **Settings / Configuración** permite activar los avisos, guardar hasta 10 números destinatarios y elegir una plantilla propia o reutilizar la plantilla actual de solicitudes de prospectos. La configuración se guarda en PostgreSQL y sobrevive a reinicios; empieza desactivada. El envío usa las credenciales existentes `META_WHATSAPP_TOKEN` y `META_WHATSAPP_PHONE_NUMBER_ID`, también cuando el mensaje entrante llega desde Twilio.
+La plantilla aprobada para los avisos es `nombre_aviso_mensaje_recibido`. Se configura desde el entorno del backend; el panel **Settings / Configuración** permite únicamente guardar hasta 10 números destinatarios y enviar una prueba. Con números guardados, los avisos están activos. Guardar una lista vacía los desactiva. La configuración se conserva en PostgreSQL y sobrevive a reinicios.
 
-Se genera **un solo aviso inicial por contacto y ciclo**, enviado a los destinatarios configurados. Los siguientes mensajes del mismo contacto no generan otro aviso. Cuando un inquiry se marca por primera vez como `QUALIFIED` o `CLOSED` (también al completar la calificación automática), se habilita el siguiente ciclo: el primer mensaje posterior podrá generar otro aviso, y los posteriores quedarán silenciados hasta que otra solicitud se califique. Guardar repetidamente esos estados, pasar de `QUALIFIED` a `CLOSED`, tomar/liberar control humano o desactivar/reactivar avisos no reinicia el ciclo. La notificación de solicitud completada sigue siendo un envío independiente y conserva su comportamiento actual.
+En el `.env` que utiliza producción añade:
+
+```env
+META_INCOMING_MESSAGE_TEMPLATE_NAME="nombre_aviso_mensaje_recibido"
+META_INCOMING_MESSAGE_TEMPLATE_LANG="es_MX"
+```
+
+El idioma debe coincidir exactamente con la aprobación de Meta: `es_MX` para Español (México), `es` para Español genérico. El valor preparado es `es_MX`, según la guía inicial. También se necesitan las credenciales existentes `META_WHATSAPP_TOKEN` y `META_WHATSAPP_PHONE_NUMBER_ID`; conserva sus valores actuales. Docker Compose lee `.env`. Los scripts locales de desarrollo y producción copian `.env.development` y `.env.production` a `.env`, respectivamente, por lo que las dos variables se incluyen también en esos archivos. `.env.example` contiene el ejemplo sin credenciales.
+
+El aviso envía exactamente dos parámetros de cuerpo, en orden: **nombre del contacto** (`{{1}}`) y **WhatsApp con código de país** (`{{2}}`). El nombre, idioma y formato se toman del backend; la configuración anterior de plantilla propia o de solicitud en PostgreSQL y los campos enviados por clientes antiguos no pueden sustituir la plantilla del entorno. La plantilla de solicitud de prospecto completado sigue siendo independiente y usa las variables existentes `META_OWNER_LEAD_TEMPLATE_NAME` y `META_OWNER_LEAD_TEMPLATE_LANG`.
+
+Se genera **un solo aviso inicial por contacto y ciclo**, enviado a los destinatarios configurados. Los siguientes mensajes del mismo contacto no generan otro aviso. Cuando un inquiry se marca por primera vez como `QUALIFIED` o `CLOSED` (también al completar la calificación automática), se habilita el siguiente ciclo: el primer mensaje posterior podrá generar otro aviso. Guardar repetidamente esos estados, pasar de `QUALIFIED` a `CLOSED`, tomar/liberar control humano o borrar/restaurar destinatarios no reinicia el ciclo.
 
 El aviso funciona con texto y archivos y durante control humano. Se envía junto al procesamiento de la IA: un fallo de envío no impide que responda. El remitente se excluye si está entre los destinatarios. Los estados de entrega de WhatsApp y las respuestas salientes no generan avisos. No se reenvía el texto del cliente.
 
-El ciclo y su consumo se guardan en `Contact` y se reclaman de forma atómica; cada mensaje entrante guarda el ciclo en que llegó. Los mensajes simultáneos generan un solo aviso y el trabajo retrasado de un ciclo antiguo no consume el siguiente. El primer cambio a calificado/completado se registra en `Inquiry.incomingNotificationResetAt` y reinicia el ciclo en la misma transacción. El estado sobrevive a reinicios.
+El ciclo y su consumo se guardan en `Contact` y se reclaman de forma atómica; cada mensaje entrante guarda el ciclo en que llegó. Los mensajes simultáneos generan un solo aviso y el trabajo retrasado de un ciclo antiguo no consume el siguiente. El primer cambio a calificado/completado se registra en `Inquiry.incomingNotificationResetAt` y reinicia el ciclo en la misma transacción.
 
-Los webhooks duplicados se ignoran. Los intentos se registran en `IncomingMessageNotification`, con restricción única por mensaje y destinatario y estados `PENDING`, `SENT` o `FAILED`. `SENT` significa que Meta aceptó el mensaje y devolvió su ID, no que se haya entregado al teléfono. Se hace un intento por ciclo sin reenvíos automáticos, incluidos errores ambiguos o caídas del proceso, para evitar avisos duplicados. Los logs incluyen IDs locales, tipo de error y código de Meta cuando está disponible, sin texto del cliente ni números destinatarios. La eliminación de un contacto espera sus avisos en curso y borra estos registros por cascada al eliminar los mensajes; la configuración global se conserva.
+Los intentos se registran en `IncomingMessageNotification`, con restricción única por mensaje y destinatario y estados `PENDING`, `SENT` o `FAILED`. `SENT` significa aceptación por Meta y un ID devuelto, no entrega al teléfono. Se hace un intento por ciclo sin reenvíos automáticos. Los logs incluyen IDs locales, tipo de error y código de Meta cuando está disponible, sin texto del cliente ni números destinatarios. La eliminación de un contacto espera sus avisos en curso y borra estos registros al eliminar sus mensajes; los números globales se conservan.
 
-### Reutilizar la plantilla de solicitudes
+Para probar, guarda los números con código de país (México: +52 y los 10 dígitos), uno por línea, y pulsa **Enviar prueba**. Se envía un WhatsApp real a todos los destinatarios guardados con el nombre “Contacto de prueba” y un número ficticio; no crea contactos, inquiries ni conversaciones y no consume ningún ciclo. Comprueba la recepción en los teléfonos.
 
-Selecciona **Reutilizar plantilla actual de solicitudes de prospectos** en Settings y guarda. Se enviará `templateMode: "OWNER_LEAD"` y se usará el nombre de `META_OWNER_LEAD_TEMPLATE_NAME` y el idioma exacto de `META_OWNER_LEAD_TEMPLATE_LANG`; no se sustituyen por el nombre/idioma de la plantilla propia. La configuración local actual utiliza `nuevo_inquiry_conta_magno` con idioma `en`. El panel muestra los valores efectivos del backend.
-
-Se envían las mismas seis variables y en el mismo orden que la notificación de solicitud: **folio, nombre, WhatsApp, correo, necesidad, plan**. Si aún no existe un folio se usa `Primer contacto`; los demás datos desconocidos se envían como `Pendiente`. Cuando ya hay datos reales se utilizan esos valores. La prueba también envía seis variables y no consume el ciclo de ningún contacto.
-
-Esto permite reutilizar técnicamente la plantilla sin crear otra. Su texto aprobado no está guardado en el repositorio: comprueba en WhatsApp Manager que tenga sentido al primer contacto, con datos pendientes. Si afirma que el prospecto ya está calificado o presupone datos completos, conviene conservar una plantilla propia para el aviso inicial. Meta exige que las plantillas se usen para el fin designado, según su [política oficial](https://business.whatsapp.com/policy/preview?lang=es_LA).
-
-### Crear una plantilla propia (opcional)
-
-1. Abre [WhatsApp Manager](https://business.facebook.com/wa/manage/message-templates/), selecciona la cuenta conectada al backend y entra en **Plantillas de mensajes → Crear plantilla**.
-2. Usa el nombre `aviso_mensaje_recibido`, el idioma **Español (México)** (`es_MX`) y variables numéricas/posicionales. Para este aviso operativo proponemos **Utilidad**; es una recomendación para este caso, sujeta a la clasificación y aprobación de Meta.
-3. Usa solo el cuerpo siguiente, sin encabezado, botones ni otras variables:
-
-```text
-Conta Magno: recibiste un nuevo mensaje de {{1}} (WhatsApp {{2}}). Revisa la conversación en el panel de atención.
-```
-
-4. En las muestras escribe `María Pérez` para `{{1}}` (nombre) y `+525555555555` para `{{2}}` (WhatsApp del contacto). Envía a revisión y espera el estado **Aprobada**. Si eliges Español genérico, usa `es` en Settings; el idioma debe coincidir exactamente con la plantilla aprobada.
-5. En Settings guarda los números con código de país, uno por línea, el nombre y el idioma exactos. Mantén los avisos desactivados y pulsa **Enviar prueba**. La prueba envía un WhatsApp real a todos los destinatarios guardados; no crea contactos, inquiries ni conversaciones.
-6. Comprueba la recepción en los teléfonos, activa las notificaciones y guarda. Añade solo miembros de tu equipo que aceptaron recibir estos avisos. Meta exige una plantilla aprobada para iniciar conversaciones y puede cobrar los envíos. Consulta la [política oficial de WhatsApp](https://business.whatsapp.com/policy/preview?lang=es_LA) y la [guía de plantillas de Meta Blueprint](https://www.facebookblueprint.com/student/path/263623-message-templates).
-
-Para desplegar esta función, aplica las migraciones pendientes con `pnpm prisma:deploy`, genera Prisma y compila/reinicia el backend. `20261004010000_add_incoming_notifications` añade dos tablas; `20261005000000_incoming_notification_cycles` añade los campos del ciclo y el modo de plantilla. La segunda conserva los avisos anteriores como ciclos consumidos y marca las calificaciones históricas para que guardar sus estados otra vez no genere reinicios. Las migraciones no borran historial. También compila y publica el frontend actualizado con `pnpm build`. Los destinatarios y la selección se administran desde Settings; el modo de reutilización utiliza las variables existentes de la plantilla de solicitudes.
+Este ajuste no requiere una migración adicional si ya se aplicaron las migraciones de memoria, notificaciones y ciclos. Para desplegar, descarga los cambios, añade las variables al `.env` del servidor, reconstruye/recrea el backend y publica el frontend actualizado. Los campos antiguos de plantilla y activación se conservan en la base como históricos; la activación efectiva depende de que haya destinatarios guardados.
 
 ## Verificación
 
@@ -104,7 +95,7 @@ pnpm exec prisma validate
 
 Las pruebas simuladas cubren memoria nueva/importada, turnos sin duplicados, mensajes humanos y concurrentes, funciones, argumentos inválidos, límite de rondas, respuestas incompletas/rechazadas, cierre, control humano y limpieza remota previa a la eliminación local. No utilizan OpenAI ni envían WhatsApp.
 
-Las pruebas de avisos verifican configuración, autenticación, teléfonos y duplicados, errores por destinatario, control humano, archivos y que una notificación lenta o fallida no bloquee la respuesta de la IA. También cubren un aviso por ciclo, persistencia al reiniciar, trabajo retrasado de ciclos antiguos y reutilización de las seis variables con datos pendientes. La prueba de PostgreSQL comprueba la actualización desde avisos anteriores, reinicios de ciclo por calificación manual/automática (incluidos cambios simultáneos y repetidos), configuración persistida, restricciones únicas y limpieza por cascada.
+Las pruebas de avisos verifican números, autenticación, duplicados, errores por destinatario, control humano, archivos y que una notificación lenta o fallida no bloquee la respuesta de la IA. También cubren un aviso por ciclo, persistencia al reiniciar, trabajo retrasado, activación al guardar números y la plantilla fija de dos variables, incluyendo configuraciones históricas que intenten sustituirla. La prueba de PostgreSQL comprueba la actualización desde avisos anteriores, reinicios de ciclo por calificación manual/automática, números persistidos, campos históricos ignorados, restricciones únicas y limpieza por cascada.
 
 Para probar la migración con registros existentes, crea una base PostgreSQL local **vacía y desechable**, cuyo nombre termine en `_test`, y ejecuta:
 
@@ -150,7 +141,7 @@ Comprueba `/health`, realiza una prueba controlada de dos turnos y verifica el p
 - `POST /api/conversations/:id/messages`
 - `GET /api/contacts` y `DELETE /api/contacts/:id`
 - `GET /api/settings/incoming-notifications` y `PATCH /api/settings/incoming-notifications` (autenticación administrativa)
-- `POST /api/settings/incoming-notifications/test` (envío real a todos los números guardados, incluso desactivado)
+- `POST /api/settings/incoming-notifications/test` (envío real a todos los números guardados sin consumir el ciclo)
 - `GET /health`
 
 Usa `http/auth.http` para iniciar sesión en el panel. Los archivos `http/meta-webhook.http`, `http/twilio-webhook.http`, `http/admin.http`, `http/contacts.http` y `http/settings.http` incluyen ejemplos. Los webhooks, el envío humano y las pruebas de avisos pueden enviar WhatsApp real.
