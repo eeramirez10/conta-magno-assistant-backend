@@ -58,7 +58,7 @@ export class ResponsesClient {
     conversationId: string;
     prompt: string;
     contextJson: Record<string, unknown>;
-    onToolCall: (call: AssistantToolCall) => Promise<Record<string, unknown>>;
+    onToolCall: (call: AssistantToolCall) => Promise<any>;
     shouldContinue: () => Promise<boolean>;
   }) {
     const toolResults: Array<Record<string, unknown>> = [];
@@ -112,7 +112,7 @@ export class ResponsesClient {
           }
         }
         toolResults.push({ tool: call.name, ok: result.ok });
-        outputs.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(result) });
+        outputs.push({ type: "function_call_output", call_id: call.call_id, output: Array.isArray(result) ? result : JSON.stringify(result) });
       }
       // Persist tool results before the next generation, including when control changes.
       await this.storeToolOutputs(payload.conversationId, outputs);

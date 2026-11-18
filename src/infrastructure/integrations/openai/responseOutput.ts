@@ -1,4 +1,5 @@
-import { ConversationStage } from "../../../domain/enums/ConversationStage.js";
+import { ASSISTANT_CONVERSATION_STAGES, ConversationStage } from "../../../domain/enums/ConversationStage.js";
+import { CONTRIBUYENTE_TYPE_VALUES } from "../../../domain/enums/ContribuyenteType.js";
 
 const stringFields = ["fullName", "email", "phoneWhatsApp", "clientType", "specialtyProfile", "mainNeed", "urgency", "budgetRange", "recommendedPlan", "preferredDate", "preferredTime"] as const;
 export type AssistantStructuredOutput = {
@@ -17,13 +18,14 @@ export const assistantOutputFormat = {
     required: ["replyText", "nextStage", "extractedFields"],
     properties: {
       replyText: { type: "string" },
-      nextStage: { type: "string", enum: Object.values(ConversationStage) },
+      nextStage: { type: "string", enum: ASSISTANT_CONVERSATION_STAGES },
       extractedFields: {
         type: "object",
         additionalProperties: false,
         required: [...stringFields, "needsHuman"],
         properties: {
           ...Object.fromEntries(stringFields.map((field) => [field, { type: ["string", "null"] }])),
+          clientType: { type: ["string", "null"], enum: [...CONTRIBUYENTE_TYPE_VALUES, null] },
           needsHuman: { type: ["boolean", "null"] }
         }
       }
@@ -38,7 +40,7 @@ export function parseAssistantOutput(raw: string): AssistantStructuredOutput {
   if (!output || typeof output !== "object" || Array.isArray(output) ||
     Object.keys(output).sort().join() !== "extractedFields,nextStage,replyText" ||
     typeof output.replyText !== "string" || !output.replyText.trim() ||
-    !Object.values(ConversationStage).includes(output.nextStage as ConversationStage) ||
+    !(ASSISTANT_CONVERSATION_STAGES as string[]).includes(output.nextStage as string) ||
     !output.extractedFields || typeof output.extractedFields !== "object" || Array.isArray(output.extractedFields)) {
     throw new Error("Respuesta JSON inválida del asistente");
   }
@@ -49,6 +51,9 @@ export function parseAssistantOutput(raw: string): AssistantStructuredOutput {
   }
   for (const key of stringFields) {
     if (fields[key] !== null && typeof fields[key] !== "string") throw new Error("Campo extraído inválido");
+  }
+  if (fields.clientType !== null && !(CONTRIBUYENTE_TYPE_VALUES as string[]).includes(fields.clientType as string)) {
+    throw new Error("clientType inválido: se requiere un código del catálogo o null");
   }
   if (fields.needsHuman !== null && typeof fields.needsHuman !== "boolean") throw new Error("needsHuman inválido");
   return {

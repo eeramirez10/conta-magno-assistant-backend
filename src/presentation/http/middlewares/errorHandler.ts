@@ -10,7 +10,7 @@ export function errorHandler(error: unknown, _req: Request, res: Response, _next
     {
       ...(isOpenAiError ? { openAiStatus: error.status, requestId: error.requestID } : { err: error }),
       method: _req.method,
-      path: _req.path
+      path: _req.path.startsWith("/chat-files/") ? "/chat-files/[redacted]" : _req.path
     },
     "Unhandled error"
   );

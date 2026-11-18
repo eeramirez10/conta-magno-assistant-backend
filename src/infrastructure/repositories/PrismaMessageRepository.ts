@@ -11,6 +11,7 @@ function mapMessage(row: {
   rawPayload: unknown;
   createdAt: Date;
   openAiSyncedAt: Date | null;
+  attachments?: Array<{id:string;name:string;mime:string;size:number;status:string;transcript:string|null;error:string|null}>;
 }): Message {
   return new Message(
     row.id,
@@ -20,7 +21,8 @@ function mapMessage(row: {
     row.text,
     row.rawPayload,
     row.createdAt,
-    row.openAiSyncedAt
+    row.openAiSyncedAt,
+    row.attachments?.map(({id,name,mime,size,status,transcript,error})=>({id,name,mime,size,status,transcript,error})) ?? []
   );
 }
 
@@ -75,6 +77,7 @@ export class PrismaMessageRepository implements IMessageRepository {
   public async listByConversationId(conversationId: string): Promise<Message[]> {
     const rows = await prisma.message.findMany({
       where: { conversationId },
+      include: {attachments:true},
       orderBy: [{ createdAt: "asc" }, { id: "asc" }]
     });
 

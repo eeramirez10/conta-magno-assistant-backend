@@ -96,10 +96,12 @@ export function fixture() {
   const contactService = new ContactApplicationService(contactRepo, new ContactDomainService(), realtime, conversationRepo, remote.client);
   const conversationService = new ConversationApplicationService(conversationRepo, messageRepo, contactRepo, metaClient, new ConversationDomainService(), realtime, inquiryRepo);
   const inquiryService = new InquiryApplicationService(inquiryRepo, {} as any, {} as any, new InquiryDomainService());
+  const ownerTemplatePayloads: any[] = [];
+  const updatedNotificationPayloads: any[] = [];
   const notifications: any = {
     notifyLeadCreated: async () => { effects.leads++; },
-    notifyLeadUpdated: async () => { effects.updatedNotifications++; },
-    notifyOwnerLeadTemplate: async () => { effects.ownerTemplates++; }
+    notifyLeadUpdated: async (payload: any) => { effects.updatedNotifications++; updatedNotificationPayloads.push(payload); },
+    notifyOwnerLeadTemplate: async (payload: any) => { effects.ownerTemplates++; ownerTemplatePayloads.push(payload); }
   };
   const router = new AssistantToolRouterService(contactService, conversationService, inquiryService, notifications);
   const incomingAlerts: Array<{ messageId: string; senderWaId: string; senderName: string }> = [];
@@ -108,7 +110,7 @@ export function fixture() {
   const sent: string[] = [];
   const provider: any = { sendTextMessage: async (_wa: string, text: string) => { sent.push(text); return { providerMessageId: `sent_${sent.length}` }; } };
   const incoming = (id: string, text = id): any => ({ waId: contact.waId, text, provider: "META", providerMessageId: id, rawPayload: {}, messageType: "text" });
-  return { remote, contact, conversation, inquiry, messages, effects, contactService, conversationService, router, orchestrator, provider, incoming, sent, incomingAlerts, incomingNotifications };
+  return { remote, contact, conversation, inquiry, messages, effects, contactService, conversationService, inquiryService, router, orchestrator, provider, incoming, sent, incomingAlerts, incomingNotifications, ownerTemplatePayloads, updatedNotificationPayloads };
 }
 
 export function deferred<T = void>() {

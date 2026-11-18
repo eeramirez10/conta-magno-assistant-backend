@@ -3,7 +3,7 @@ FROM node:22-bookworm-slim AS builder
   WORKDIR /app
 
   RUN apt-get update \
-      && apt-get install -y --no-install-recommends openssl \
+      && apt-get install -y --no-install-recommends openssl ffmpeg \
       && rm -rf /var/lib/apt/lists/* \
       && npm install --global pnpm@9
 
@@ -23,7 +23,7 @@ FROM node:22-bookworm-slim AS builder
   ENV PORT=4000
 
   RUN apt-get update \
-      && apt-get install -y --no-install-recommends openssl \
+      && apt-get install -y --no-install-recommends openssl ffmpeg \
       && rm -rf /var/lib/apt/lists/*
 
   COPY --from=builder /app/dist ./dist

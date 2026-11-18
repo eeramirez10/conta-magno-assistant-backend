@@ -45,7 +45,7 @@ export class InquiryApplicationService {
   }
 
   public async updateFields(dto: UpdateInquiryFieldsRequestDTO): Promise<Inquiry> {
-    const updated = await this.inquiryRepository.updateFields(dto.inquiryId, {
+    return this.inquiryRepository.updateFields(dto.inquiryId, {
       clientType: dto.clientType,
       specialtyProfile: dto.specialtyProfile,
       mainNeed: dto.mainNeed,
@@ -54,17 +54,6 @@ export class InquiryApplicationService {
       recommendedPlan: dto.recommendedPlan,
       notes: dto.notes
     });
-
-    if (!updated.recommendedPlan) {
-      const recommended = this.inquiryDomainService.recommendPlan({
-        mainNeed: updated.mainNeed,
-        specialtyProfile: updated.specialtyProfile,
-        urgency: updated.urgency
-      });
-      return this.inquiryRepository.updateFields(dto.inquiryId, { recommendedPlan: recommended });
-    }
-
-    return updated;
   }
 
   public async getLatestByConversationId(conversationId: string): Promise<Inquiry | null> {

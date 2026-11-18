@@ -21,6 +21,8 @@ export interface ServerToClientEvents {
 }
 
 export interface ClientToServerEvents {
+  'conversation:activity': (event: {conversationId:string;controlSessionId:string}, ack: (result:{ok:boolean;expiresAt?:string;serverNow?:string})=>void)=>void
+
   'conversation:join': (conversationId: string) => void
   'conversation:leave': (conversationId: string) => void
 }

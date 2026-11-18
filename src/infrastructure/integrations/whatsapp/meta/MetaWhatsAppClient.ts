@@ -17,13 +17,14 @@ export class MetaWhatsAppTemplateError extends Error {
 
 export class MetaWhatsAppClient {
 
-  private readonly endpoint: string = `https://graph.facebook.com/v21.0/${Env.metaWhatsAppPhoneNumberId}/messages`;
+  private readonly endpoint: string = `https://graph.facebook.com/${process.env.META_GRAPH_API_VERSION || 'v27.0'}/${Env.metaWhatsAppPhoneNumberId}/messages`;
 
   public async sendText(toWaId: string, text: string): Promise<{ id: string | null }> {
 
 
     const response = await fetch(this.endpoint, {
       method: "POST",
+      signal: AbortSignal.timeout(20_000),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${Env.metaWhatsAppToken}`
@@ -36,8 +37,9 @@ export class MetaWhatsAppClient {
       })
     });
 
-    const data = (await response.json()) as { messages?: Array<{ id: string }> };
-    return { id: data.messages?.[0]?.id ?? null };
+    const data = (await response.json()) as { messages?: Array<{ id: string }>; error?: { code?: number } };
+    if (!response.ok || !data.messages?.[0]?.id) throw new Error(`Meta no confirmó el mensaje (${data.error?.code ?? response.status})`);
+    return { id: data.messages[0].id };
   }
 
   public async sendTemplate(payload: sendTemplatePayload): Promise<{ id: string | null }> {

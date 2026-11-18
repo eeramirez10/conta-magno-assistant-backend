@@ -57,7 +57,7 @@ test("function calls execute sequentially across rounds with matching call IDs",
   for (const request of f.requests) {
     assert.equal(request.model, "gpt-6-luna"); assert.equal(request.reasoning.effort, "low");
     assert.equal(request.max_output_tokens, 8192); assert.equal(request.text.format.strict, true);
-    assert.equal(request.tools.length, 7); assert.ok(request.tools.every((tool: any) => tool.strict === false));
+    assert.equal(request.tools.length, 8); assert.ok(request.tools.every((tool: any) => tool.strict === false));
     assert.equal(request.conversation, "conv_test"); assert.deepEqual(request.input, []);
   }
 });
@@ -82,6 +82,8 @@ for (const [name, invalid] of [
   ["refusal", { ...response(), output: [{ type: "message", content: [{ type: "refusal", refusal: "No" }] }] }],
   ["invalid JSON", { ...response(), output_text: "not json" }],
   ["invalid stage", response(finalOutput("INVALID"))],
+  ["disabled scheduling stage", response(finalOutput("SCHEDULING"))],
+  ["unstructured tax classification", response(finalOutput("QUALIFYING", { clientType: "No tengo RFC" }))],
   ["empty reply", response({ ...finalOutput(), replyText: " " })],
   ["embedded tools", response({ ...finalOutput(), toolCalls: [] } as any)]
 ] as const) test(`rejects ${name} before delivery`, async () => {
@@ -125,4 +127,12 @@ test("all outputs are persisted in batches permitted by the items endpoint", asy
   f.setGeneration(async () => ++n === 1 ? response(finalOutput(), Array.from({ length: 21 }, (_, i) => ({ name: "read", arguments: "{}", call_id: `call_${i}` }))) : response());
   await f.client.runResponse(turn);
   assert.deepEqual(f.appended.map((batch) => batch.items.length), [20, 1]);
+});
+
+test('attachment tool results remain native multimodal content instead of serialized JSON', async () => {
+ const f=fakeOpenAi(); let calls=0;
+ f.setGeneration(async()=>++calls===1?response(finalOutput(),[{name:'readConversationAttachment',arguments:'{"attachmentId":"file-one"}',call_id:'read-file'}]):response());
+ const parts=[{type:'input_text',text:'Invoice'},{type:'input_file',file_id:'file-one'}];
+ await f.client.runResponse({...turn,onToolCall:async()=>parts});
+ assert.deepEqual(f.appended[0].items[0].output,parts);
 });

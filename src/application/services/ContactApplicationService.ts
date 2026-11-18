@@ -12,6 +12,8 @@ export class ContactApplicationService {
   private readonly deletingContacts = new Set<string>();
   private readonly activeTurns = new Map<string, Set<Promise<void>>>();
 
+  public cleanupAttachments?: (conversationIds: string[]) => Promise<void>;
+
   public isDeleting(id: string): boolean {
     return this.deletingContacts.has(id);
   }
@@ -76,6 +78,7 @@ export class ContactApplicationService {
       for (const conversation of conversations) {
         if (conversation.openAiConversationId) await this.responsesClient.deleteConversation(conversation.openAiConversationId);
       }
+      await this.cleanupAttachments?.(conversations.map((item) => item.id));
       const result = await this.contactRepository.deleteWithRelations(id)
       if (!result) return null
 

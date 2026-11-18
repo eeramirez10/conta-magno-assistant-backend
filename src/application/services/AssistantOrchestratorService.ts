@@ -17,6 +17,7 @@ import { NotificationApplicationService } from "./NotificationApplicationService
 import { AssistantToolRouterService } from "./AssistantToolRouterService.js";
 import { Inquiry } from "../../domain/entities/Inquiry.js";
 import { IncomingNotificationApplicationService } from "./IncomingNotificationApplicationService.js";
+import { contaMagnoCommercialCatalog } from "../catalog/contaMagnoCommercialCatalog.js";
 
 type PendingIncomingItem = {
   provider: IWhatsAppProvider;
@@ -34,20 +35,6 @@ export class AssistantOrchestratorService {
   private static readonly unsupportedNonTextReply =
     "Por el momento solo puedo recibir mensajes de texto. ¿Podrías enviarme tu mensaje por escrito, por favor?";
 
-  private static readonly contribuyenteTypeLabelByCode: Record<string, string> = {
-    PF_RESICO: "Persona Física - RESICO",
-    PF_ACTIVIDAD_EMPRESARIAL_Y_PROFESIONAL: "Persona Física - Actividad Empresarial y Profesional",
-    PF_SUELDOS_Y_SALARIOS: "Persona Física - Sueldos y Salarios",
-    PF_ARRENDAMIENTO: "Persona Física - Arrendamiento",
-    PF_PLATAFORMAS_TECNOLOGICAS: "Persona Física - Plataformas Tecnológicas/Digitales",
-    PF_OTROS_INGRESOS: "Persona Física - Otros ingresos",
-    PM_REGIMEN_GENERAL: "Persona Moral - Régimen General",
-    PM_RESICO: "Persona Moral - RESICO",
-    PM_SIN_FINES_DE_LUCRO: "Persona Moral - Sin fines de lucro",
-    NO_LO_SE_AUN: "No lo sé aún",
-    NO_INSCRITO_EN_HACIENDA: "No inscrito en Hacienda/SAT (sin RFC)"
-  };
-
   constructor(
     private readonly responsesClient: ResponsesClient,
     private readonly contactService: ContactApplicationService,
@@ -57,6 +44,16 @@ export class AssistantOrchestratorService {
     private readonly toolRouterService: AssistantToolRouterService,
     private readonly incomingNotifications: Pick<IncomingNotificationApplicationService, "notifyMessage">
   ) { }
+
+  public attachmentContext?: (messageId: string) => Promise<string>;
+  public automationAllowed?: (waId: string) => Promise<boolean>;
+
+  public async processSavedIncoming(provider: IWhatsAppProvider, incoming: UnifiedIncomingMessage, messageId: string): Promise<unknown> {
+    const contact = await this.contactService.getByWaId({ waId: incoming.waId });
+    if (!contact) return;
+    const conversation = await this.conversationService.createOrGetActive(contact.id, incoming.provider);
+    return this.contactService.withConversationActivity(contact.id, () => this.processBatch(conversation.id, contact.id, [{ provider, incoming, messageId }]));
+  }
 
   public async processIncoming(provider: IWhatsAppProvider, incoming: UnifiedIncomingMessage): Promise<{ ok: boolean; replyText: string; folio: string }> {
     const [upsertContactError, upsertContactDto] = UpsertContactRequestDTO.validate({
@@ -159,10 +156,11 @@ export class AssistantOrchestratorService {
     if (conversation.stage === ConversationStage.PENDING_HUMAN) {
       return { ok: true, replyText: "human_control_active", folio: "HUMAN" };
     }
+    const controlWaId = (await this.contactService.getById(contactId))?.waId;
     const controlVersion = this.conversationService.getHumanControlVersion(conversationId);
     const shouldContinue = async () => {
       const current = await this.conversationService.getConversation(conversationId);
-      return Boolean(!this.contactService.isDeleting(contactId) && current && current.stage !== ConversationStage.PENDING_HUMAN &&
+      return Boolean((!this.automationAllowed || await this.automationAllowed(controlWaId ?? "")) && !this.contactService.isDeleting(contactId) && current && current.stage !== ConversationStage.PENDING_HUMAN &&
         this.conversationService.getHumanControlVersion(conversationId) === controlVersion);
     };
 
@@ -215,12 +213,13 @@ export class AssistantOrchestratorService {
     const allMessages = await this.conversationService.listMessages(conversation.id);
     const cutoff = allMessages.findIndex((message) => message.id === latestItem.messageId);
     if (cutoff < 0) throw new Error("Mensaje del lote no encontrado");
-    const messages = allMessages.slice(0, cutoff + 1);
+    const messages = await Promise.all(allMessages.slice(0, cutoff + 1).map(async message => ({ ...message, text: message.text + (this.attachmentContext ? await this.attachmentContext(message.id) : "") })));
 
     const contextJson = {
       business: "Conta Magno",
+      resumeAfterHumanControl: (latestItem.incoming.rawPayload as {resume?: boolean})?.resume === true,
       timezone: "America/Mexico_City",
-      goals: ["calificar lead", "recomendar paquete", "capturar datos para seguimiento humano"],
+      goals: ["calificar lead según su necesidad", "recomendar servicio o paquete", "capturar datos para seguimiento humano por este chat", "para CFO, conseguir una llamada inicial que coordinará el equipo para preparar una propuesta personalizada"],
       contact,
       conversation: {
         id: conversation.id,
@@ -229,11 +228,7 @@ export class AssistantOrchestratorService {
         flowCompleted: isCompletedFlow
       },
       inquiry,
-      packages: {
-        basico: "$800-$1,000",
-        intermedio: "$1,200-$1,500",
-        premium: "$1,800-$2,500"
-      },
+      commercialCatalog: contaMagnoCommercialCatalog,
       contribuyenteTypes: CONTRIBUYENTE_TYPE_OPTIONS
     };
 
@@ -292,11 +287,9 @@ export class AssistantOrchestratorService {
     let latestInquiry = inquiryAfterTools ?? inquiry;
 
     if (canUpdateInquiry && await shouldContinue()) {
-      const combinedInboundText = acceptedBatch.map((item) => item.incoming.text).join("\n");
-      const inferredClientType = extracted.clientType ?? this.inferClientTypeFromMessage(combinedInboundText);
       const [updateFieldsErr, updateFieldsDto] = UpdateInquiryFieldsRequestDTO.validate({
         inquiryId: inquiry.id,
-        clientType: inferredClientType,
+        clientType: extracted.clientType,
         specialtyProfile: extracted.specialtyProfile,
         mainNeed: extracted.mainNeed,
         urgency: extracted.urgency,
@@ -353,7 +346,7 @@ export class AssistantOrchestratorService {
     }
 
     if (!await shouldContinue()) return { ok: true, replyText: "human_control_active", folio: inquiry.folio };
-    const replyText = this.sanitizeAssistantReplyText(assistantResult.output.replyText);
+    const replyText = assistantResult.output.replyText;
     const sent = await latestItem.provider.sendTextMessage(latestItem.incoming.waId, replyText);
 
     await this.conversationService.addOutboundMessage({
@@ -404,20 +397,6 @@ export class AssistantOrchestratorService {
     await new Promise((resolve) => setTimeout(resolve, queueWindowMs));
   }
 
-  private sanitizeAssistantReplyText(raw: string): string {
-    let text = raw;
-
-    for (const [code, label] of Object.entries(AssistantOrchestratorService.contribuyenteTypeLabelByCode)) {
-      const codeWithLabelPattern = new RegExp(`\\b${code}\\b\\s*\\(([^)]*)\\)`, "g");
-      text = text.replace(codeWithLabelPattern, label);
-
-      const codeOnlyPattern = new RegExp(`\\b${code}\\b`, "g");
-      text = text.replace(codeOnlyPattern, label);
-    }
-
-    return text;
-  }
-
   private isUnsupportedIncomingMessage(incoming: UnifiedIncomingMessage): boolean {
     return Boolean(incoming.messageType && incoming.messageType !== "text");
   }
@@ -455,34 +434,4 @@ export class AssistantOrchestratorService {
     const label = messageType?.trim().toLowerCase() || "unsupported";
     return `[${label} message]`;
   }
-
-  private inferClientTypeFromMessage(text: string): string | undefined {
-    const normalized = text
-      .trim()
-      .toLowerCase()
-      .replace(/[áàäâ]/g, "a")
-      .replace(/[éèëê]/g, "e")
-      .replace(/[íìïî]/g, "i")
-      .replace(/[óòöô]/g, "o")
-      .replace(/[úùüû]/g, "u");
-
-    const noInscritoSignals = [
-      "no estoy dado de alta",
-      "aun no estoy dado de alta",
-      "todavia no estoy dado de alta",
-      "no dado de alta en sat",
-      "no dado de alta en hacienda",
-      "no estoy en sat",
-      "no estoy en hacienda",
-      "no tengo rfc",
-      "sin rfc"
-    ];
-
-    if (noInscritoSignals.some((signal) => normalized.includes(signal))) {
-      return "NO_INSCRITO_EN_HACIENDA";
-    }
-
-    return undefined;
-  }
-
 }

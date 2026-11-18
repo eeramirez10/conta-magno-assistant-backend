@@ -1,5 +1,6 @@
 import { RequestValidator, ValidationTuple } from "./_base.js";
 import { ContribuyenteType, parseContribuyenteType } from "../../../../domain/enums/ContribuyenteType.js";
+import { normalizeRecommendation } from "../../../catalog/contaMagnoCommercialCatalog.js";
 
 export class UpdateInquiryFieldsRequestDTO {
   constructor(
@@ -36,7 +37,8 @@ export class UpdateInquiryFieldsRequestDTO {
     const mainNeed = RequestValidator.optionalString(payload, "mainNeed") ?? undefined;
     const urgency = RequestValidator.optionalString(payload, "urgency") ?? undefined;
     const budgetRange = RequestValidator.optionalString(payload, "budgetRange") ?? undefined;
-    const recommendedPlan = RequestValidator.optionalString(payload, "recommendedPlan") ?? undefined;
+    const rawRecommendation = RequestValidator.optionalString(payload, "recommendedPlan");
+    const recommendedPlan = rawRecommendation ? normalizeRecommendation(rawRecommendation) : undefined;
     const notes = RequestValidator.optionalString(payload, "notes") ?? undefined;
 
     return [

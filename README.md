@@ -11,6 +11,8 @@ Backend Node.js + TypeScript para WhatsApp (Meta y Twilio), con OpenAI Responses
 
 Los Request DTO exponen `validate(payload: unknown): [string?, RequestDTO?]`. El primer elemento contiene el error y el segundo el DTO validado. No se usa Zod.
 
+La interpretación de intenciones, preguntas, respuestas y datos del prospecto corresponde exclusivamente al modelo de IA, con el contexto y las tools disponibles. El backend no clasifica mensajes por expresiones regulares, palabras clave o frases, ni modifica el texto de respuesta generado por el modelo. Persiste los datos estructurados y aplica validaciones de formato, códigos de catálogo, control humano y reglas operativas. Si el modelo no extrae un dato, permanece pendiente. `clientType` acepta únicamente un código del catálogo o `null` en la salida del modelo; las tools exigen códigos válidos y no traducen frases del prospecto. Esta regla también está en `AGENTS.md`.
+
 ## Configuración y desarrollo
 
 Se requiere Node.js 22, pnpm 9 y PostgreSQL. Configura `.env.development` y `.env.production` tomando `.env.example` como referencia. Ambos deben contener:
@@ -57,6 +59,36 @@ Un inquiry cerrado sigue recibiendo respuestas a dudas en la misma conversación
 Al eliminar un contacto, se bloquean turnos nuevos y se espera a que terminen los turnos en curso; después se borran primero todos los items y las conversaciones remotas asociadas, fuera de la transacción local. Un `404` cuenta como eliminación realizada. Cualquier otro fallo conserva los datos locales y devuelve error para permitir reintento; la limpieza remota puede haber avanzado parcialmente. Después se eliminan los registros locales y se emite el evento existente de Socket.IO.
 
 La cola y las comprobaciones de control operan en una sola instancia del backend. Las respuestas son completas, sin streaming. La migración a Responses conserva los contratos REST y Socket.IO existentes.
+
+## Catálogo y calificación comercial
+
+`src/application/catalog/contaMagnoCommercialCatalog.ts` centraliza los servicios, precios y alcances que usan tanto el prompt como el contexto de cada turno: contabilidad inteligente con IA, CFO Externo, asesoría fiscal y consultoría empresarial. Los paquetes de personas físicas conservan sus rangos y alcances: Básico $800–$1,000 MXN, Intermedio $1,200–$1,500 MXN y Premium $1,800–$2,500 MXN, sin añadir supuestos sobre IVA. Una declaración anual u otra solicitud puntual requiere cotización del contador.
+
+La recomendación depende de la necesidad. Una persona física con negocio también puede interesarse en CFO Externo. Su calificación breve recoge problema financiero, giro, tamaño, equipo contable e interés en la inversión, aprovechando lo conocido y preguntando cada dato faltante por separado. La estructura comercial confirmada el 17 de noviembre de 2026 sustituye los rangos anteriores con estos precios mensuales sugeridos, más IVA y sujetos a evaluación de necesidades y propuesta personalizada:
+
+- **CFO Esencial: $8,000 MXN/mes.** Diagnóstico inicial de necesidades, análisis de estados financieros, indicadores de liquidez y rentabilidad, tablero de KPIs y reporte financiero mensual.
+- **CFO Estratégico: $15,000 MXN/mes.** Incluye Esencial y añade flujo de efectivo proyectado, presupuestos, desviaciones, costos, gastos, capital de trabajo y recomendaciones financieras. Seguimiento quincenal.
+- **CFO Integral: $25,000 MXN/mes.** Incluye Estratégico y añade planeación financiera estratégica, acompañamiento a la dirección, supervisión financiera del equipo interno y análisis de decisiones de inversión. Seguimiento semanal.
+
+El diagnóstico financiero tiene una tarifa de referencia de **$15,000 MXN más IVA**. En Esencial se contrata por separado. En Estratégico existe la posibilidad de bonificar $7,500 con contrato mínimo de seis meses; no es una bonificación automática ni garantizada. En Integral se incluye con contrato mínimo de seis meses. No se acumulan los beneficios de diagnóstico entre niveles ni se añade una tarifa de implementación no confirmada. El diagnóstico inicial de necesidades incluido en los paquetes y la llamada inicial de evaluación no equivalen a contratar el diagnóstico financiero.
+
+La metodología comprende cuatro etapas: diagnóstico inicial, planeación e implementación de indicadores, seguimiento financiero mensual y evaluación estratégica periódica. Los entregables y la frecuencia dependen del paquete, respetando su seguimiento quincenal o semanal; esa periodicidad no fija por sí sola un número de reuniones. La tabla general de nueve entregables de las imágenes se conserva como referencia, con su contenido y periodicidades alternativas, sin ampliar lo incluido en cada paquete. Los alcances específicos quedan sujetos a propuesta comercial.
+
+Quedan excluidos contabilidad operativa, declaraciones fiscales, nómina, auditorías, cobranza directa, ejecución de pagos, trámites legales, licencias de software, implementaciones tecnológicas complejas y estudios especializados de inversión; se cotizan por separado. La supervisión del equipo no añade contabilidad operativa, y analizar decisiones de inversión no incluye estudios especializados de inversión.
+
+`mainNeed` guarda la necesidad, `recommendedPlan` el servicio o paquete determinado por el agente y `specialtyProfile` el resumen acumulado del negocio y su interés, incluido el paquete CFO elegido y el interés en la llamada inicial. El plazo de seis meses solo se registra si el prospecto lo expresa; aceptar la llamada no implica aceptar un contrato. `budgetRange` se usa únicamente para presupuestos expresados por el prospecto. Guardar datos parciales ya no asigna un paquete por palabras clave; la recomendación permanece pendiente hasta que se determine. Una recomendación explícita de CFO se guarda como `CFO Externo`, también en las notificaciones; el nivel Esencial, Estratégico o Integral se conserva en `specialtyProfile`.
+
+El objetivo comercial de CFO es conseguir una llamada de diagnóstico inicial con el responsable de Conta Magno para evaluar al prospecto y preparar una propuesta personalizada. Se propone la llamada tras explicar la inversión de referencia; el equipo la coordina por este chat, sin reservas automáticas. No se afirma precio, gratuidad ni duración de esa llamada, porque no están definidos.
+
+Tras confirmar interés se solicitan nombre, correo y confirmación de WhatsApp, uno por mensaje. El régimen se registra solo cuando el prospecto lo indica; se aceptan `NO_LO_SE_AUN` y `NO_INSCRITO_EN_HACIENDA` sin impedir el cierre. El mensaje final de CFO es:
+
+> Gracias por compartir tus datos. El equipo de Conta Magno se pondrá en contacto contigo por este mismo chat para coordinar una llamada de diagnóstico inicial con el responsable de Conta Magno, evaluar tus necesidades y preparar una propuesta personalizada.
+
+Para los demás servicios se conserva:
+
+> Gracias por compartir tus datos. El equipo de Conta Magno se pondrá en contacto contigo por este mismo chat para revisar tus necesidades y continuar la atención.
+
+`SCHEDULING` permanece en el enum y en los datos históricos, pero se excluye del esquema de salida y de las funciones activas. El router rechaza `listAvailableSlots` y `createTentativeAppointment` y no ejecuta reservas. Los registros históricos pueden continuar en etapas activas sin eliminar sus citas anteriores. Se conservan el control humano, la memoria, los contratos REST y Socket.IO y las protecciones de conversaciones completadas. Estos cambios no requieren columnas ni migraciones.
 
 ## Avisos de mensajes entrantes por WhatsApp
 
@@ -110,9 +142,12 @@ Prueba aislada con la API real, datos sintéticos y limpieza remota al terminar:
 ```sh
 pnpm env:use:dev
 pnpm responses:smoke
+pnpm responses:qualification
 ```
 
-Requiere una clave con acceso al modelo y consume tokens. No importa la base de datos ni clientes WhatsApp. Valida el JSON y reporta metadatos sin imprimir la respuesta completa.
+Requieren una clave con acceso al modelo y consumen tokens. No importan la base de datos ni clientes WhatsApp. `responses:smoke` valida el JSON y reporta metadatos sin imprimir la respuesta completa. `responses:qualification` revisa catorce conversaciones sintéticas: los tres paquetes contables, una declaración anual, captura sin RFC, CFO para persona física y empresa, los tres niveles CFO y sus precios sugeridos, entregables y periodicidades, condiciones del diagnóstico y contratos de seis meses, metodología, exclusiones, captura secuencial, régimen desconocido, seguimiento después del cierre y llamada inicial coordinada por humanos sin agenda automática. Valida las respuestas con aserciones y guarda el diálogo sintético en un archivo temporal cuya ruta reporta al terminar, también ante fallos; elimina cada conversación remota en un bloque `finally`.
+
+Para repetir escenarios concretos se puede usar una expresión regular, por ejemplo `RESPONSES_QUALIFICATION_FILTER='CFO Integral|Diagnóstico CFO|Llamada inicial' pnpm responses:qualification`. Un filtro sin coincidencias produce un error.
 
 ## Despliegue
 
@@ -146,4 +181,42 @@ Comprueba `/health`, realiza una prueba controlada de dos turnos y verifica el p
 
 Usa `http/auth.http` para iniciar sesión en el panel. Los archivos `http/meta-webhook.http`, `http/twilio-webhook.http`, `http/admin.http`, `http/contacts.http` y `http/settings.http` incluyen ejemplos. Los webhooks, el envío humano y las pruebas de avisos pueden enviar WhatsApp real.
 
-Las siete functions registradas son `getContactByWaId`, `upsertContact`, `getActiveConversation`, `updateConversationStage`, `createOrGetOpenInquiry`, `updateInquiryFields` y `closeInquiry`. Cada definición usa `strict: false` para preservar argumentos opcionales y validación por DTO. El prompt actual no ofrece citas ni videollamadas.
+Las siete functions registradas son `getContactByWaId`, `upsertContact`, `getActiveConversation`, `updateConversationStage`, `createOrGetOpenInquiry`, `updateInquiryFields` y `closeInquiry`. Cada definición usa `strict: false` para preservar argumentos opcionales y validación por DTO. El prompt propone una llamada inicial para CFO que coordina el equipo por chat; no reserva fechas ni horarios.
+
+## Archivos, moderación y control temporal
+
+La migración `20261118000000_chat_capabilities` añade adjuntos, enlaces temporales, políticas de números, sesiones de control y trabajos persistentes. Aplicarla antes de arrancar el backend actualizado. Las funciones multimedia y el bloqueo remoto se habilitan para Meta; las rutas de texto de Twilio se conservan. Publicar también el frontend hermano `conta-magno-assistant-frontend`.
+
+Configurar `PUBLIC_API_URL` con la URL HTTPS pública del backend, `MEDIA_STORAGE_DIR` con un directorio privado persistente, `META_GRAPH_API_VERSION` (predeterminado `v27.0`) y `OPENAI_TRANSCRIPTION_MODEL` (predeterminado `gpt-transcribe`). Docker incluye FFmpeg y monta el volumen `conta_magno_media`. Fuera de Docker deben instalarse `ffmpeg` y `ffprobe`. Respaldar el volumen junto con PostgreSQL; no montar el directorio como contenido público. Los archivos se conservan hasta eliminar el contacto.
+
+El panel permite adjuntar hasta cinco archivos: PDF, Word, Excel, imágenes, CSV, XML y texto. Límite por archivo: 16 MB; imágenes: 5 MB. Los audios entrantes admiten hasta 16 MB y diez minutos; se guardan original, reproducción MP3 y transcripción. No hay grabación ni envío de audio. Los CSV/XML salientes se comparten mediante enlaces de descarga de 24 horas; “Solicitar archivo” copia un enlace de carga de un solo uso y 24 horas para enviarlo al prospecto. Los documentos se leen con `readConversationAttachment`, que devuelve contenido multimodal al modelo, nunca inferencias por palabras clave. Las hojas grandes pueden tener lectura parcial y no deben utilizarse para inventar totales completos.
+
+El webhook Meta guarda cada mensaje y su trabajo antes de confirmar recepción. Un worker procesa la cola de una instancia de backend, con deduplicación por ID de WhatsApp. Los trabajos pendientes sobreviven a reinicios; los que estaban ejecutándose se marcan fallidos para revisión porque podrían haber generado efectos externos. No se reenvían automáticamente mensajes de resultado incierto. Los errores quedan visibles en el panel.
+
+El filtro de IA evalúa cada entrada no autorizada explícitamente por un operador antes de crear leads, avisos o respuestas. Publicidad, dudas y fallos de clasificación quedan en revisión silenciosa. Autorizar un número habilita su atención futura y evalúa si hay pendientes; bloquearlo desactiva la atención local inmediatamente e intenta sincronizarlo con Meta. Un fallo remoto mantiene el bloqueo local y muestra `FAILED` para reintentar. La lista de bloqueos no se elimina al borrar un contacto. No se envían solicitudes automáticas de baja a terceros.
+
+Tomar control crea una sesión de 120 segundos; escribir y enviar renueva el vencimiento. Abrir la conversación no lo renueva. La actividad se confirma por Socket.IO con respaldo HTTP; el servidor es la autoridad y una sesión vencida no puede enviar. Al liberar o vencer el control se evalúan los pendientes mediante IA, sin responder si el operador ya resolvió todo. Los escalamientos de la IA sin sesión manual no vencen automáticamente. Los envíos marcados `UNKNOWN` requieren revisión humana antes de reanudar automáticamente.
+
+Nuevas rutas autenticadas: `GET /api/conversations/:id/capabilities`, `POST /api/conversations/:id/activity`, `POST /api/conversations/:id/attachments` (multipart, campo `files`), `POST /api/conversations/:id/file-links`, `GET /api/attachments/:id/content`, `GET /api/chat-policies`, `POST /api/chat-policies/:waId` y `POST /api/conversations/:id/policy`. Las acciones y envíos humanos incluyen `controlSessionId`. Los enlaces de `/chat-files/:token` conceden acceso temporal únicamente al recurso de su token; no acceden al historial.
+
+La prueba adicional `tests/chat-runtime.integration.test.ts` usa exclusivamente `CHAT_TEST_DATABASE_URL`, apuntando a una base local desechable cuyo nombre termine en `_test`, previamente migrada y vacía de datos. Utiliza dobles de OpenAI, Meta y WhatsApp: no realiza envíos reales. La prueba de migraciones anterior sigue usando una base separada con `TEST_DATABASE_URL`.
+
+Prueba real de IA sin WhatsApp: `pnpm exec tsx src/scripts/chatAiSmoke.ts /ruta/audio-sintetico.mp3`. El argumento de audio es opcional; siempre comprueba lectura de XML mediante una tool multimodal. Solo usar archivos sintéticos. El script elimina sus archivos y conversación de OpenAI al terminar.
+
+### Actualización con Docker Compose
+
+En el servidor del backend, conservar las credenciales actuales en `.env` y configurar `PUBLIC_API_URL` con la URL HTTPS pública de la API, incluido cualquier prefijo de proxy (el mismo valor base de `VITE_API_URL` del panel). Añadir `OPENAI_TRANSCRIPTION_MODEL=gpt-transcribe` y `META_GRAPH_API_VERSION=v27.0`. Si un valor contiene `$`, usar comillas simples para impedir interpolación de Docker Compose.
+
+```sh
+git pull --ff-only origin main
+docker compose build
+docker compose stop conta-magno
+docker compose run --rm --no-deps conta-magno node node_modules/prisma/build/index.js migrate deploy
+docker compose up -d --no-deps conta-magno
+docker compose logs --tail=100 conta-magno
+curl --fail http://127.0.0.1:4000/health
+```
+
+Conservar el respaldo habitual de PostgreSQL antes de la migración. El volumen `conta_magno_media` conserva archivos entre reconstrucciones; no usar `docker compose down -v` para actualizar. No es necesario ejecutar `pnpm start` dentro del contenedor: el `CMD` arranca el backend compilado directamente.
+
+El frontend está configurado en su repositorio para Firebase Hosting (`conta-magno-admin-panel`). Actualizar ese repositorio, comprobar `VITE_API_URL` en `.env.production`, ejecutar `pnpm install --frozen-lockfile`, `pnpm build` y `firebase deploy --only hosting`. Los cambios de archivos y control requieren publicar también ese frontend.

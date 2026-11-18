@@ -5,10 +5,12 @@ export class ConversationMessageResponseDTO {
     public readonly id: string,
     public readonly direction: "IN" | "OUT",
     public readonly text: string,
-    public readonly createdAt: string
+    public readonly createdAt: string,
+    public readonly attachments: Message["attachments"] = [],
+    public readonly deliveryStatus: string | null = null
   ) {}
 
   public static fromEntity(entity: Message): ConversationMessageResponseDTO {
-    return new ConversationMessageResponseDTO(entity.id, entity.direction, entity.text, entity.createdAt.toISOString());
+    return new ConversationMessageResponseDTO(entity.id, entity.direction, entity.text, entity.createdAt.toISOString(), entity.attachments, (entity.rawPayload as {deliveryStatus?: string})?.deliveryStatus ?? null);
   }
 }

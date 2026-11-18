@@ -2,6 +2,8 @@ import { ConversationStage } from "../enums/ConversationStage.js";
 
 export class ConversationDomainService {
   public canMove(from: ConversationStage, to: ConversationStage): boolean {
+    if (to === ConversationStage.SCHEDULING) return false;
+    if (from === ConversationStage.SCHEDULING) return true;
     if (from === to) {
       return true;
     }

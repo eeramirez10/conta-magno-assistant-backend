@@ -1,3 +1,5 @@
+import { ChatRuntime } from "../../infrastructure/chat/ChatRuntime.js";
+import { chatCapabilitiesRouter } from "./routes/chatCapabilities.routes.js";
 import cors from "cors";
 import express, { Request, Response } from "express";
 import { createServer } from "node:http";
@@ -118,9 +120,24 @@ const orchestratorService = new AssistantOrchestratorService(
   incomingNotifications
 );
 
+const chatRuntime = new ChatRuntime(conversationService, contactService, orchestratorService, new MetaWhatsAppProviderAdapter(new MetaWhatsAppClient()), realtimePublisher, incomingNotifications);
+realtimeServer.on('connection', socket => {
+  socket.on('conversation:activity', (event, ack) => {
+    if (!event || typeof event.conversationId !== 'string' || typeof event.controlSessionId !== 'string' || typeof ack !== 'function') return;
+    void chatRuntime.activity(event.conversationId,event.controlSessionId).then(state=>ack({ok:true,expiresAt:state.control?.expiresAt.toISOString(),serverNow:state.serverNow})).catch(()=>ack({ok:false}));
+  });
+});
+orchestratorService.automationAllowed = (waId) => chatRuntime.allowed(waId);
+orchestratorService.attachmentContext = (id) => chatRuntime.attachmentContext(id);
+toolRouterService.readAttachment = (id, conversationId) => chatRuntime.readAttachment(id, conversationId);
+contactService.cleanupAttachments = (ids) => chatRuntime.cleanup(ids);
+app.use(chatCapabilitiesRouter(chatRuntime, authService));
+void chatRuntime.start().catch(() => logger.error("Chat worker could not start; verify migrations"));
+
 const metaController = new WhatsAppMetaWebhookController(
   new MetaWhatsAppProviderAdapter(new MetaWhatsAppClient()),
-  orchestratorService
+  orchestratorService,
+  (payload) => chatRuntime.ingest(payload)
 );
 const twilioController = new WhatsAppTwilioWebhookController(
   new TwilioWhatsAppProviderAdapter(new TwilioWhatsAppClient()),

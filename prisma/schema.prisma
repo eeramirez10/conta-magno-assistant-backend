@@ -93,6 +93,9 @@ model Conversation {
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   contact           Contact            @relation(fields: [contactId], references: [id])
+  control ChatControl?
+  shareLinks ChatShareLink[]
+  chatJobs ChatJob[]
   messages          Message[]
   inquiries         Inquiry[]
 
@@ -110,6 +113,7 @@ model Message {
   rawPayload        Json
   createdAt         DateTime     @default(now())
   conversation      Conversation @relation(fields: [conversationId], references: [id])
+  attachments ChatAttachment[]
   incomingNotifications IncomingMessageNotification[]
 
   @@unique([providerMessageId])
@@ -216,4 +220,57 @@ model IncomingMessageNotification {
   message           Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, recipient])
+}
+
+model ChatControl {
+  conversationId String @id
+  sessionId String
+  expiresAt DateTime
+  startedAt DateTime @default(now())
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+model NumberPolicy {
+  waId String @id
+  decision String @default("AUTO")
+  reason String?
+  remoteStatus String?
+  updatedAt DateTime @updatedAt
+}
+model ChatAttachment {
+  id String @id @default(cuid())
+  messageId String
+  name String
+  mime String
+  size Int @default(0)
+  path String?
+  playbackPath String?
+  providerMediaId String?
+  openAiFileId String?
+  status String @default("PENDING")
+  transcript String?
+  error String?
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  links ChatShareLink[]
+}
+model ChatShareLink {
+  id String @id @default(cuid())
+  tokenHash String @unique
+  conversationId String
+  attachmentId String?
+  mode String
+  expiresAt DateTime
+  usedAt DateTime?
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  attachment ChatAttachment? @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+}
+model ChatJob {
+  id String @id
+  conversationId String
+  messageId String?
+  kind String
+  status String @default("PENDING")
+  error String?
+  createdAt DateTime @default(now())
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  @@index([status, createdAt])
 }

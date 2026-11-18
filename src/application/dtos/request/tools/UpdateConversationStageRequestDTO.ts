@@ -1,4 +1,4 @@
-import { ConversationStage } from "../../../../domain/enums/ConversationStage.js";
+import { ASSISTANT_CONVERSATION_STAGES, ConversationStage } from "../../../../domain/enums/ConversationStage.js";
 import { RequestValidator, ValidationTuple } from "./_base.js";
 
 export class UpdateConversationStageRequestDTO {
@@ -19,7 +19,7 @@ export class UpdateConversationStageRequestDTO {
       return ["conversationId y stage son obligatorios"];
     }
 
-    if (!(Object.values(ConversationStage) as string[]).includes(stage)) {
+    if (!(ASSISTANT_CONVERSATION_STAGES as string[]).includes(stage)) {
       return ["stage inválido"];
     }
 

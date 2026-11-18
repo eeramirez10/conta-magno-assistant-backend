@@ -10,3 +10,5 @@ npm-debug.log*
 pnpm-debug.log*
 storage/documents/*
 Dockerfile.backup*
+
+storage/

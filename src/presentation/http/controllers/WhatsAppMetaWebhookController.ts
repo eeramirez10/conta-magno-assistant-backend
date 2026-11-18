@@ -6,7 +6,8 @@ import { Env } from "../../../infrastructure/config/env.js";
 export class WhatsAppMetaWebhookController {
   constructor(
     private readonly provider: IWhatsAppProvider,
-    private readonly orchestratorService: AssistantOrchestratorService
+    private readonly orchestratorService: AssistantOrchestratorService,
+    private readonly enqueue?: (payload: unknown) => Promise<void>
   ) { }
 
   public verify(req: Request, res: Response): void {
@@ -30,6 +31,7 @@ export class WhatsAppMetaWebhookController {
       return;
     }
 
+    if (this.enqueue) { await this.enqueue(dto.payload); res.status(200).json({ ok: true, queued: true }); return; }
     const incoming = this.provider.parseIncoming(dto.payload);
     if (!incoming) {
       res.status(200).json({ ok: true, ignored: true });

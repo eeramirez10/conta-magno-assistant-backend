@@ -5,11 +5,8 @@ import { UpdateConversationStageRequestDTO } from "../dtos/request/tools/UpdateC
 import { CreateOrGetOpenInquiryRequestDTO } from "../dtos/request/tools/CreateOrGetOpenInquiryRequestDTO.js";
 import { UpdateInquiryFieldsRequestDTO } from "../dtos/request/tools/UpdateInquiryFieldsRequestDTO.js";
 import { CloseInquiryRequestDTO } from "../dtos/request/tools/CloseInquiryRequestDTO.js";
-import { ListAvailableSlotsRequestDTO } from "../dtos/request/tools/ListAvailableSlotsRequestDTO.js";
-import { CreateTentativeAppointmentRequestDTO } from "../dtos/request/tools/CreateTentativeAppointmentRequestDTO.js";
 import { InquiryStatus } from "../../domain/enums/InquiryStatus.js";
 import { ConversationStage } from "../../domain/enums/ConversationStage.js";
-import { ContribuyenteType } from "../../domain/enums/ContribuyenteType.js";
 import { ContactApplicationService } from "./ContactApplicationService.js";
 import { ConversationApplicationService } from "./ConversationApplicationService.js";
 import { InquiryApplicationService } from "./InquiryApplicationService.js";
@@ -28,17 +25,22 @@ export class AssistantToolRouterService {
     private readonly notificationService: NotificationApplicationService
   ) {}
 
+  public readAttachment?: (id: string, conversationId: string) => Promise<any>;
+
   public async executeNativeTool(
     toolCall: ToolCallInput,
     fallback: { waId: string; contactId?: string; conversationId?: string; inquiryId?: string; folio?: string }
-  ): Promise<Record<string, unknown>> {
+  ): Promise<any> {
+    if (["listAvailableSlots", "createTentativeAppointment"].includes(toolCall.name)) {
+      return { tool: toolCall.name, ok: false, error: "La agenda está deshabilitada. El equipo continuará la atención por este mismo chat." };
+    }
     if (fallback.conversationId) {
       const conversation = await this.conversationService.getConversation(fallback.conversationId);
       if (!conversation || conversation.stage === ConversationStage.PENDING_HUMAN) {
         return { ok: false, error: "Control humano activo" };
       }
       const inquiry = await this.inquiryService.getLatestByConversationId(fallback.conversationId);
-      if (inquiry?.status === InquiryStatus.CLOSED && !["getContactByWaId", "getActiveConversation", "listAvailableSlots"].includes(toolCall.name)) {
+      if (inquiry?.status === InquiryStatus.CLOSED && !["getContactByWaId", "getActiveConversation", "readConversationAttachment"].includes(toolCall.name)) {
         return { ok: false, error: "El inquiry está cerrado y no puede modificarse." };
       }
     }
@@ -47,6 +49,9 @@ export class AssistantToolRouterService {
       if (toolCall.arguments[key] !== undefined && toolCall.arguments[key] !== fallback[key]) {
         return { ok: false, error: "La función debe usar los IDs del contexto actual." };
       }
+    }
+    if (toolCall.name === "readConversationAttachment" && this.readAttachment && fallback.conversationId) {
+      return this.readAttachment(String(toolCall.arguments.attachmentId ?? ""), fallback.conversationId);
     }
     return this.executeOne(toolCall, fallback);
   }
@@ -128,67 +133,6 @@ export class AssistantToolRouterService {
         if (error || !dto) return { tool: toolCall.name, ok: false, error: error ?? "DTO inválido" };
         const inquiry = await this.inquiryService.close(dto);
         return { tool: toolCall.name, ok: true, status: inquiry.status };
-      }
-
-      case "listAvailableSlots": {
-        const today = new Date().toISOString().slice(0, 10);
-        const [error, dto] = ListAvailableSlotsRequestDTO.validate({
-          fromDate: toolCall.arguments.fromDate ?? today,
-          limit: toolCall.arguments.limit ?? 5
-        });
-        if (error || !dto) return { tool: toolCall.name, ok: false, error: error ?? "DTO inválido" };
-
-        const slots = await this.inquiryService.listAvailableSlots(dto.fromDate, dto.limit);
-        return {
-          tool: toolCall.name,
-          ok: true,
-          slots: slots.map((s) => ({ id: s.id, date: s.date, startTime: s.startTime, endTime: s.endTime, timezone: s.timezone }))
-        };
-      }
-
-      case "createTentativeAppointment": {
-        const inquiry = fallback.inquiryId ? await this.inquiryService.detail(fallback.inquiryId) : null;
-        const contact = fallback.contactId ? await this.contactService.getById(fallback.contactId) : null;
-        const missingRequiredFields: string[] = [];
-
-        if (!contact || !contact.fullName || /^prospecto conta magno$/i.test(contact.fullName.trim())) {
-          missingRequiredFields.push("Nombre completo");
-        }
-        if (!contact || !contact.phoneE164 || contact.phoneE164.trim().length < 8) {
-          missingRequiredFields.push("Número de WhatsApp");
-        }
-        if (!contact || !contact.email || !contact.email.includes("@")) {
-          missingRequiredFields.push("Correo electrónico");
-        }
-        if (!inquiry || !inquiry.clientType || inquiry.clientType === ContribuyenteType.NO_LO_SE_AUN) {
-          missingRequiredFields.push("Tipo de contribuyente");
-        }
-
-        if (missingRequiredFields.length > 0) {
-          return {
-            tool: toolCall.name,
-            ok: false,
-            error: "Faltan datos obligatorios antes de agendar.",
-            missingFields: missingRequiredFields
-          };
-        }
-
-        const [error, dto] = CreateTentativeAppointmentRequestDTO.validate({
-          inquiryId: toolCall.arguments.inquiryId ?? fallback.inquiryId,
-          slotId: toolCall.arguments.slotId
-        });
-        if (error || !dto) return { tool: toolCall.name, ok: false, error: error ?? "DTO inválido" };
-
-        const appointment = await this.inquiryService.createTentativeAppointment(dto.inquiryId, dto.slotId);
-        if (fallback.folio) {
-          await this.notificationService.notifyAppointmentRequested({
-            inquiryId: dto.inquiryId,
-            folio: fallback.folio,
-            slotText: `slotId=${dto.slotId}`
-          });
-        }
-
-        return { tool: toolCall.name, ok: true, appointmentId: appointment.id, status: appointment.status };
       }
 
       default:
