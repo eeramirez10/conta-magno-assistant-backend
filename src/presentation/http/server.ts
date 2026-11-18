@@ -128,6 +128,7 @@ realtimeServer.on('connection', socket => {
   });
 });
 orchestratorService.automationAllowed = (waId) => chatRuntime.allowed(waId);
+orchestratorService.scopeGate = (conversationId, messageId, shouldContinue) => chatRuntime.scopeGate(conversationId, messageId, shouldContinue);
 orchestratorService.attachmentContext = (id) => chatRuntime.attachmentContext(id);
 toolRouterService.readAttachment = (id, conversationId) => chatRuntime.readAttachment(id, conversationId);
 contactService.cleanupAttachments = (ids) => chatRuntime.cleanup(ids);

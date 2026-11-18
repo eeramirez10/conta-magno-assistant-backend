@@ -230,3 +230,20 @@ Bloquear conserva siempre la protección local. Cuando Meta rechaza el bloqueo r
 Los PDF entrantes admiten redirecciones verificadas de las CDN de Meta y se suben a OpenAI con la extensión correspondiente a su tipo real. `POST /api/attachments/:id/retry` permite recuperar archivos fallidos sin reenviar mensajes al prospecto. Conserva la descarga del original aunque falle la transcripción o lectura de IA. El panel evita la página intermedia de ngrok y verifica que la respuesta de medios no sea HTML.
 
 Las acciones de bloqueo están en los menús de opciones de la conversación y de la lista. El clip para adjuntar está junto al campo de texto. Ya no se ofrece “Solicitar archivo” en el panel; los enlaces previamente emitidos conservan su compatibilidad hasta vencer.
+
+
+### Control de alcance del chat
+
+El modelo evalúa cada mensaje antes de la calificación. Una primera desviación genera un aviso; la insistencia silencia la IA hasta recibir una consulta pertinente. El estado persiste por conversación y no modifica el bloqueo de WhatsApp ni el control humano.
+
+Esta versión requiere la migración `20261119000000_conversation_scope` antes de iniciar el backend actualizado. Desde el repositorio del servidor:
+
+```sh
+git pull --ff-only
+docker compose build conta-magno
+docker compose stop conta-magno
+docker compose run --rm conta-magno node node_modules/prisma/build/index.js migrate deploy
+docker compose up -d conta-magno
+```
+
+Prueba sintética del control de rol y bienvenida, sin WhatsApp ni escritura de leads: `pnpm exec tsx src/scripts/scopeSmoke.ts`. La prueba utiliza Responses y elimina su conversación remota al terminar. La integración requiere una base local desechable con `CHAT_TEST_DATABASE_URL` y todas las migraciones aplicadas.

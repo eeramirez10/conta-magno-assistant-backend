@@ -93,6 +93,7 @@ model Conversation {
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   contact           Contact            @relation(fields: [contactId], references: [id])
+  scopeControl ConversationScopeControl?
   control ChatControl?
   shareLinks ChatShareLink[]
   chatJobs ChatJob[]
@@ -273,4 +274,11 @@ model ChatJob {
   createdAt DateTime @default(now())
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   @@index([status, createdAt])
+}
+
+model ConversationScopeControl {
+  conversationId String @id
+  state String @default("ACTIVE")
+  updatedAt DateTime @updatedAt
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 }

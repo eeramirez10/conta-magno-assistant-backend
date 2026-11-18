@@ -45,6 +45,7 @@ export class AssistantOrchestratorService {
     private readonly incomingNotifications: Pick<IncomingNotificationApplicationService, "notifyMessage">
   ) { }
 
+  public scopeGate?: (conversationId: string, messageId: string, shouldContinue: () => Promise<boolean>) => Promise<{ proceed: boolean; replyText: string | null }>;
   public attachmentContext?: (messageId: string) => Promise<string>;
   public automationAllowed?: (waId: string) => Promise<boolean>;
 
@@ -176,6 +177,17 @@ export class AssistantOrchestratorService {
     const acceptedBatch = batch;
     const latestItem = acceptedBatch[acceptedBatch.length - 1];
 
+    if (this.scopeGate) {
+      const scope = await this.scopeGate(conversation.id, latestItem.messageId, shouldContinue);
+      if (!scope.proceed) {
+        if (scope.replyText && await shouldContinue()) {
+          const sent = await latestItem.provider.sendTextMessage(latestItem.incoming.waId, scope.replyText);
+          await this.conversationService.addOutboundMessage({ conversationId, providerMessageId: sent.providerMessageId, text: scope.replyText, rawPayload: { scopeReplyFor: latestItem.messageId } });
+        }
+        return { ok: true, replyText: scope.replyText ?? "scope_silent", folio: "SCOPE" };
+      }
+    }
+
     const associatedInquiry = await this.inquiryService.getLatestByConversationId(conversation.id);
     const isCompletedFlow = conversation.stage === ConversationStage.COMPLETED || associatedInquiry?.status === InquiryStatus.CLOSED;
     let inquiry: Inquiry;
@@ -225,6 +237,7 @@ export class AssistantOrchestratorService {
         id: conversation.id,
         stage: conversation.stage,
         status: conversation.status,
+        isFirstReply: !allMessages.some(message => message.direction === "OUT"),
         flowCompleted: isCompletedFlow
       },
       inquiry,

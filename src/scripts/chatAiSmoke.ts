@@ -4,6 +4,7 @@ import OpenAI, {toFile} from 'openai';
 import {readFile} from 'node:fs/promises';
 import {Env} from '../infrastructure/config/env.js';
 import {ResponsesClient} from '../infrastructure/integrations/openai/ResponsesClient.js';
+import {contaMagnoCommercialCatalog} from '../application/catalog/contaMagnoCommercialCatalog.js';
 import {contaMagnoAssistantPrompt} from '../application/prompts/contaMagnoAssistantPrompt.js';
 
 function syntheticPdf():Buffer {
@@ -24,7 +25,16 @@ async function main(){
   if(process.argv[2]){
    const transcript=await ai.audio.transcriptions.create({model:transcriptionModel(),file:await toFile(await readFile(process.argv[2]),'synthetic.mp3')});
    assert.ok(transcript.text.trim());
-   console.log('Audio sintético transcrito correctamente; no se envió WhatsApp.');
+   conversationId=(await ai.conversations.create()).id;
+   await ai.conversations.items.create(conversationId,{items:[{type:'message',role:'user',content:'Envié un audio attachmentId=synthetic_audio; atiende lo que solicito en él.'}]});
+   let audioRead=false;
+   const audioReply=await client.runResponse({conversationId,prompt:contaMagnoAssistantPrompt,contextJson:{conversation:{flowCompleted:true,isFirstReply:true},commercialCatalog:contaMagnoCommercialCatalog},shouldContinue:async()=>true,onToolCall:async call=>{
+    assert.equal(call.name,'readConversationAttachment');assert.equal(call.arguments.attachmentId,'synthetic_audio');audioRead=true;
+    return [{type:'input_text',text:`Transcripción del audio sintético: ${transcript.text}`}];
+   }});
+   assert.ok(audioRead);assert.match(audioReply.output.replyText,/anual/i);
+   await client.deleteConversation(conversationId);conversationId=null;
+   console.log('Audio sintético transcrito y respondido mediante lectura de tool; no se envió WhatsApp.');
   }
   for(const fixture of [{name:'synthetic.xml',mime:'application/xml',data:Buffer.from('<invoice folio="SYNTHETIC-42" currency="MXN" total="1234"/>')},{name:'synthetic.pdf',mime:'application/pdf',data:syntheticPdf()}]) {
   const file=await ai.files.create({purpose:'user_data',file:await toFile(fixture.data,fixture.name,{type:fixture.mime})});fileId=file.id;

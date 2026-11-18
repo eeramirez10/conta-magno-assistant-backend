@@ -75,6 +75,27 @@ test('chat runtime persists moderation, attachments, single-use links and contro
   blockFails=false;await runtime.setPolicy('525511111111','BLOCKED');await runtime.setPolicy('525511111111','APPROVED');
   const fresh=await runtime.take(c.id);await assert.rejects(runtime.sendFiles(c.id,taken.control!.sessionId,[],'stale'));
   assert.notEqual(fresh.control!.sessionId,taken.control!.sessionId);
+  // Read-only AI decisions persist across runtime instances, including approved numbers.
+  const aiCreate=internal.ai.responses.create;
+  let scopeDecision='OUT_OF_SCOPE';
+  internal.ai.responses.create=async()=>({status:'completed',output_text:JSON.stringify({decision:scopeDecision,replyText:scopeDecision==='OUT_OF_SCOPE'?'Aviso del modelo':null})});
+  const scopeMessage=async(text:string)=>prisma.message.create({data:{conversationId:c.id,direction:'IN',text,rawPayload:{}}});
+  const firstScope=await scopeMessage('Tema personal');
+  assert.equal((await runtime.scopeGate(c.id,firstScope.id,async()=>true)).replyText,'Aviso del modelo');
+  assert.equal((await runtime.scopeGate(c.id,firstScope.id,async()=>true)).replyText,null);
+  const restarted=new ChatRuntime(conversations,contacts,{} as any,{} as any,{conversationUpdated:()=>{}} as any,{} as any);
+  (restarted as any).ai=internal.ai;
+  const secondScope=await scopeMessage('Insistencia personal');
+  assert.equal((await restarted.scopeGate(c.id,secondScope.id,async()=>true)).replyText,null);
+  assert.equal((await runtime.state(c.id)).scopeControl.state,'PAUSED');
+  scopeDecision='IN_SCOPE';
+  const relevant=await scopeMessage('Necesito una declaración anual');
+  assert.equal((await restarted.scopeGate(c.id,relevant.id,async()=>true)).proceed,true);
+  assert.equal((await runtime.state(c.id)).scopeControl.state,'ACTIVE');
+  const interrupted=await scopeMessage('Nuevo mensaje');
+  assert.equal((await runtime.scopeGate(c.id,interrupted.id,async()=>false)).proceed,false);
+  assert.equal((await prisma.message.findUniqueOrThrow({where:{id:interrupted.id}})).rawPayload.scopeAssessment,undefined);
+  internal.ai.responses.create=aiCreate;
   await runtime.cleanup([c.id]);
  }finally{await prisma.$disconnect();await rm(directory,{recursive:true,force:true})}
 });
