@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import { trustProxyHops } from "./trustProxy.js";
 
 dotenv.config();
 
@@ -23,6 +24,7 @@ export class Env {
   public static readonly authCookieName: string = process.env.AUTH_COOKIE_NAME || "conta_magno_session";
   public static readonly authSessionTtlSeconds: number = Env.toInt(process.env.AUTH_SESSION_TTL_SECONDS, 86400);
   public static readonly isProduction: boolean = process.env.NODE_ENV === "production";
+  public static readonly trustProxyHops = trustProxyHops(process.env.TRUST_PROXY_HOPS, Env.isProduction);
   public static readonly frontendOrigin: string =
     process.env.FRONTEND_ORIGIN || "http://localhost:5173";
 

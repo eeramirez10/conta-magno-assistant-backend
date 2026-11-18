@@ -247,3 +247,10 @@ docker compose up -d conta-magno
 ```
 
 Prueba sintética del control de rol y bienvenida, sin WhatsApp ni escritura de leads: `pnpm exec tsx src/scripts/scopeSmoke.ts`. La prueba utiliza Responses y elimina su conversación remota al terminar. La integración requiere una base local desechable con `CHAT_TEST_DATABASE_URL` y todas las migraciones aplicadas.
+
+
+### Proxy inverso y límites por IP
+
+Express confía en un salto de proxy en producción (`NODE_ENV=production`) y en ninguno en desarrollo. `TRUST_PROXY_HOPS` permite configurar el número real: `0` para acceso directo, `1` para un proxy que conecta con el backend, `2` si hay dos proxies que añaden su salto a `X-Forwarded-For`.
+
+Configurar esta cantidad según la cadena real y mantener el puerto de Docker publicado únicamente en localhost, como en `compose.yaml`. El proxy de entrada debe establecer correctamente las cabeceras reenviadas. No usar confianza ilimitada ni desactivar las validaciones de `express-rate-limit`. Tanto el login como los enlaces de archivos usan esta configuración para limitar por IP de cliente.

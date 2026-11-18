@@ -51,6 +51,7 @@ import { SettingsAdminController } from "./controllers/SettingsAdminController.j
 
 
 const app = express();
+app.set("trust proxy", Env.trustProxyHops);
 
 app.use(cors({
   origin: Env.frontendOrigin,
