@@ -41,7 +41,33 @@ test('chat runtime persists moderation, attachments, single-use links and contro
   assert.equal((await runtime.readAttachment(a.id,c.id))[1].type,'input_file');
   assert.equal((await runtime.readAttachment(a.id,'another'))[0].type,'input_text');
   const link=await runtime.createLink(c.id,a.id);assert.equal((await runtime.resolveLink(link.split('/').at(-1)!)).mode,'DOWNLOAD');
-  blockFails=true;await assert.rejects(runtime.setPolicy('525511111111','BLOCKED'));
+  // Reproduce a received PDF: metadata -> bounded CDN redirect -> bytes -> native file input.
+  const originalFetch=globalThis.fetch;const originalMeta=internal.meta;
+  const pdf=Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n%%EOF');
+  internal.meta=async()=>({url:'https://lookaside.fbsbx.com/test.pdf',file_size:pdf.length});
+  let downloads=0;
+  globalThis.fetch=async()=>++downloads===1?new Response(null,{status:302,headers:{location:'https://cdn.fbsbx.com/test.pdf'}}):new Response(pdf,{headers:{'content-type':'application/pdf'}});
+  try{
+   await runtime.ingest({entry:[{changes:[{value:{messages:[{id:'pdf-test',from:'525511111111',type:'document',document:{id:'media-test',filename:'balance.2026',mime_type:'application/pdf'}}]}}]}]});
+   const received=await prisma.chatAttachment.findFirstOrThrow({where:{providerMediaId:'media-test'}});
+   const prepared=await runtime.retryAttachment(received.id);assert.equal(prepared.ok,true);
+   let uploadedName='';internal.ai.files.create=async(p:any)=>{uploadedName=p.file.name;return{id:'file-pdf'}};
+   const parts=await runtime.readAttachment(received.id,c.id);assert.equal(parts[1].type,'input_file');assert.equal(uploadedName,'balance.2026.pdf');
+   assert.equal(downloads,2);assert.equal((await prisma.chatAttachment.findUniqueOrThrow({where:{id:received.id}})).status,'READY');
+  }finally{globalThis.fetch=originalFetch;internal.meta=originalMeta}
+  const {default:express}=await import('express');
+  const {chatCapabilitiesRouter}=await import('../src/presentation/http/routes/chatCapabilities.routes.js');
+  const app=express();app.use(express.json());app.use(chatCapabilitiesRouter(runtime,{getAuthenticatedUser:async(token:string)=>token==='test'?{id:'test',username:'test'}:null} as any));
+  const server=app.listen(0,'127.0.0.1');await new Promise<void>(resolve=>server.once('listening',resolve));
+  const address=server.address() as {port:number};const base=`http://127.0.0.1:${address.port}`;
+  try{
+   const received=await prisma.chatAttachment.findFirstOrThrow({where:{providerMediaId:'media-test'}});
+   const denied=await fetch(`${base}/api/attachments/${received.id}/content`);assert.equal(denied.status,401);
+   const response=await fetch(`${base}/api/attachments/${received.id}/content`,{headers:{Authorization:'Bearer test'}});assert.equal(response.status,200);assert.ok(response.headers.get('content-type')?.includes('application/pdf'));assert.ok((await response.text()).startsWith('%PDF-'));
+   blockFails=true;
+   const result=await fetch(`${base}/api/conversations/${c.id}/policy`,{method:'POST',headers:{Authorization:'Bearer test','Content-Type':'application/json'},body:JSON.stringify({decision:'BLOCKED'})});assert.equal(result.status,200);assert.equal((await result.json() as any).data.remoteStatus,'FAILED');
+  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()))}
+  blockFails=true;const blocked=await runtime.setPolicy('525511111111','BLOCKED');assert.equal(blocked.remoteStatus,'FAILED');assert.ok(blocked.warning);
   assert.equal(await runtime.allowed('525511111111'),false);
   assert.equal((await runtime.state(c.id)).policy.remoteStatus,'FAILED');
   const before=await prisma.chatJob.count();await runtime.ingest(incoming('blocked'));assert.equal(await prisma.chatJob.count(),before);

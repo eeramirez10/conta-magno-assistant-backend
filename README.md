@@ -220,3 +220,13 @@ curl --fail http://127.0.0.1:4000/health
 Conservar el respaldo habitual de PostgreSQL antes de la migración. El volumen `conta_magno_media` conserva archivos entre reconstrucciones; no usar `docker compose down -v` para actualizar. No es necesario ejecutar `pnpm start` dentro del contenedor: el `CMD` arranca el backend compilado directamente.
 
 El frontend está configurado en su repositorio para Firebase Hosting (`conta-magno-admin-panel`). Actualizar ese repositorio, comprobar `VITE_API_URL` en `.env.production`, ejecutar `pnpm install --frozen-lockfile`, `pnpm build` y `firebase deploy --only hosting`. Los cambios de archivos y control requieren publicar también ese frontend.
+
+### Correcciones de bloqueo y recepción de documentos
+
+`OPENAI_TRANSCRIPTION_MODEL` debe contener el identificador del modelo, por ejemplo `gpt-transcribe`, no el nombre de la variable. Para evitar que esa equivocación rompa los audios, el backend usa el valor predeterminado si recibe literalmente el nombre de configuración. Una denegación real de acceso al modelo sigue requiriendo revisar la cuenta y el identificador configurado.
+
+Bloquear conserva siempre la protección local. Cuando Meta rechaza el bloqueo remoto, la API devuelve el resultado local con `remoteStatus: FAILED` y `warning`, y el panel muestra la restricción informada por Meta; no se presenta como un error interno 500 ni como un bloqueo remoto confirmado. Desbloquear conserva la protección si Meta no confirma la operación.
+
+Los PDF entrantes admiten redirecciones verificadas de las CDN de Meta y se suben a OpenAI con la extensión correspondiente a su tipo real. `POST /api/attachments/:id/retry` permite recuperar archivos fallidos sin reenviar mensajes al prospecto. Conserva la descarga del original aunque falle la transcripción o lectura de IA. El panel evita la página intermedia de ngrok y verifica que la respuesta de medios no sea HTML.
+
+Las acciones de bloqueo están en los menús de opciones de la conversación y de la lista. El clip para adjuntar está junto al campo de texto. Ya no se ofrece “Solicitar archivo” en el panel; los enlaces previamente emitidos conservan su compatibilidad hasta vencer.

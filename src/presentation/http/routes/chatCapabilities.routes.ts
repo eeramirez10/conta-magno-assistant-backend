@@ -1,3 +1,4 @@
+import { uploadFilename } from '../../../infrastructure/chat/mediaSupport.js';
 import { Router } from 'express';
 import multer from 'multer';
 import { readFile } from 'node:fs/promises';
@@ -20,7 +21,7 @@ export function chatCapabilitiesRouter(runtime: ChatRuntime, auth: AuthApplicati
     }
     const a = await prisma.chatAttachment.findUniqueOrThrow({ where: { id: link.attachmentId! } });
     if (!a.path) { res.sendStatus(404); return; }
-    res.attachment(a.name).send(await readFile(a.path));
+    res.attachment(uploadFilename(a.name,a.mime)).type(a.mime).send(await readFile(a.path));
   }));
   router.post('/chat-files/:token', upload.single('file'), wrap(async(req: any,res: any) => {
     if (!req.file) throw new Error('Selecciona un archivo');
@@ -41,19 +42,20 @@ export function chatCapabilitiesRouter(runtime: ChatRuntime, auth: AuthApplicati
     await runtime.assertControl(req.params.id, String(req.body.controlSessionId));
     res.json({ ok: true, url: await runtime.createLink(req.params.id, req.body.attachmentId) });
   }));
-  router.post('/api/chat-policies/:waId', wrap(async(req: any,res: any) => { if (!/^[1-9][0-9]{7,14}$/.test(req.params.waId)) throw new Error('Número inválido'); await runtime.setPolicy(req.params.waId, String(req.body.decision)); res.json({ok:true}); }));
+  router.post('/api/chat-policies/:waId', wrap(async(req: any,res: any) => { if (!/^[1-9][0-9]{7,14}$/.test(req.params.waId)) throw new Error('Número inválido'); const data=await runtime.setPolicy(req.params.waId, String(req.body.decision)); res.json({ok:true,data}); }));
   router.get('/api/chat-policies', wrap(async(_req: any,res: any) => res.json({ ok: true, items: await prisma.numberPolicy.findMany({ orderBy: { updatedAt: 'desc' } }) })));
   router.post('/api/conversations/:id/policy', wrap(async(req: any,res: any) => {
     const c = await prisma.conversation.findUniqueOrThrow({ where: { id: req.params.id }, include: { contact: true } });
-    await runtime.setPolicy(c.contact.waId, String(req.body.decision)); res.json({ ok: true });
+    const data=await runtime.setPolicy(c.contact.waId, String(req.body.decision)); res.json({ ok: true,data });
   }));
+  router.post('/api/attachments/:id/retry', wrap(async(req:any,res:any)=>res.json(await runtime.retryAttachment(req.params.id))));
   router.get('/api/attachments/:id/content', wrap(async(req: any,res: any) => {
     const a = await prisma.chatAttachment.findUniqueOrThrow({ where: { id: req.params.id } });
     const path = req.query.playback && a.playbackPath ? a.playbackPath : a.path;
     if (!path) { res.sendStatus(404); return; }
     res.setHeader('Cache-Control','private, no-store'); res.setHeader('X-Content-Type-Options','nosniff');
+    if (!a.mime.startsWith('image/') && !req.query.playback) res.attachment(uploadFilename(a.name,a.mime));
     res.setHeader('Content-Type', req.query.playback && a.playbackPath ? 'audio/mpeg' : a.mime);
-    if (!a.mime.startsWith('image/') && !req.query.playback) res.attachment(a.name);
     res.send(await readFile(path));
   }));
   // Guard the existing text route as well; do not let an expired tab send late messages.

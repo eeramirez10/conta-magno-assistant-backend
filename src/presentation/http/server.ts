@@ -54,7 +54,7 @@ const app = express();
 
 app.use(cors({
   origin: Env.frontendOrigin,
-  allowedHeaders: ['Authorization', 'Content-Type'],
+  allowedHeaders: ['Authorization', 'Content-Type', 'ngrok-skip-browser-warning'],
 }));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true }));
