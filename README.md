@@ -254,3 +254,10 @@ Prueba sintética del control de rol y bienvenida, sin WhatsApp ni escritura de 
 Express confía en un salto de proxy en producción (`NODE_ENV=production`) y en ninguno en desarrollo. `TRUST_PROXY_HOPS` permite configurar el número real: `0` para acceso directo, `1` para un proxy que conecta con el backend, `2` si hay dos proxies que añaden su salto a `X-Forwarded-For`.
 
 Configurar esta cantidad según la cadena real y mantener el puerto de Docker publicado únicamente en localhost, como en `compose.yaml`. El proxy de entrada debe establecer correctamente las cabeceras reenviadas. No usar confianza ilimitada ni desactivar las validaciones de `express-rate-limit`. Tanto el login como los enlaces de archivos usan esta configuración para limitar por IP de cliente.
+
+
+### Recuperación de medios y actualización del panel
+
+La lectura de adjuntos resuelve el nombre del archivo dentro del `MEDIA_STORAGE_DIR` de la instancia actual, incluso para registros con rutas absolutas de otra instalación. Si falta un audio, intenta descargarlo nuevamente de Meta y reconstruye el MP3 para reproducción, conservando la transcripción existente. Los archivos que Meta ya no conserva requieren un nuevo envío del prospecto.
+
+El panel usa por defecto el prefijo de `VITE_API_URL` para el transporte Socket.IO (por ejemplo, `/conta-magno/socket.io`). Si el proxy publica Socket.IO en otra ruta, configurar `VITE_SOCKET_IO_PATH` al compilar el frontend. El proxy debe reenviar esa ruta al Socket.IO del backend (`/socket.io`). Además de los eventos, el panel consulta lista y conversación cada cinco segundos mientras está visible para recuperar mensajes omitidos sin recargar la página.

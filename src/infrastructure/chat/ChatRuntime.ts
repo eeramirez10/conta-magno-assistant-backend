@@ -2,12 +2,13 @@ import { scopeInstructions, scopeSchema, scopeTransition, parseScopeAssessment }
 import { contaMagnoCommercialCatalog } from '../../application/catalog/contaMagnoCommercialCatalog.js';
 import { transcriptionModel, uploadFilename, mediaError, trustedMediaUrl, blockFailure } from './mediaSupport.js';
 import { randomBytes, createHash } from 'node:crypto';
-import { mkdir, writeFile, readFile, rm } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { access, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { basename, join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import OpenAI, { toFile } from 'openai';
 import { fileTypeFromBuffer } from 'file-type';
+import type { ChatAttachment } from '@prisma/client';
 import { prisma } from '../database/prisma.js';
 import { Env } from '../config/env.js';
 import type { ConversationApplicationService } from '../../application/services/ConversationApplicationService.js';
@@ -39,6 +40,10 @@ export async function validateMedia(bytes: Buffer, filename: string, allowAudio:
   const ext = filename.split('.').pop()?.toLowerCase();
   if (!type && ['csv','xml','txt'].includes(ext ?? '') && !bytes.includes(0) && Buffer.from(bytes.toString('utf8')).equals(bytes)) return ext === 'xml' ? 'application/xml' : ext === 'csv' ? 'text/csv' : 'text/plain';
   throw new Error('Formato no admitido. Usa imágenes, PDF, Word, Excel, CSV o XML.');
+}
+
+export class AttachmentUnavailableError extends Error {
+  constructor() { super('El archivo ya no está disponible. Solicita que lo envíen nuevamente.'); }
 }
 
 export class ChatRuntime {
@@ -164,7 +169,7 @@ export class ChatRuntime {
   private async meta(path: string, init: RequestInit = {}) {
     const response = await fetch(`${this.graph}/${path}`, { ...init, headers: { Authorization: `Bearer ${Env.metaWhatsAppToken}`, ...init.headers }, signal: AbortSignal.timeout(30_000) });
     const data = await response.json() as any;
-    if (!response.ok || data.error) throw new Error(`Meta no confirmó la operación (código ${data.error?.code ?? response.status})${typeof data.error?.message === 'string' ? ': ' + data.error.message.slice(0,400) : ''}`);
+    if (!response.ok || data.error) throw Object.assign(new Error(`Meta no confirmó la operación (código ${data.error?.code ?? response.status})${typeof data.error?.message === 'string' ? ': ' + data.error.message.slice(0,400) : ''}`),{status:response.status});
     return data;
   }
   async setPolicy(waId: string, decision: string) {
@@ -201,10 +206,39 @@ export class ChatRuntime {
     await writeFile(path, bytes, { mode: 0o600 });
     return prisma.chatAttachment.create({ data: { messageId, name: name.slice(0, 200), mime, path, size: bytes.length, status: 'READY' } });
   }
-  private async prepare(id: string) {
+  private readonly preparing = new Map<string, Promise<ChatAttachment>>();
+  private async localMediaPath(stored: string | null): Promise<string | null> {
+    if (!stored) return null;
+    const local = join(this.storage, basename(stored));
+    try { await access(local); return local; }
+    catch (error: any) { if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null; throw error; }
+  }
+  private async prepare(id: string, transcribe = true): Promise<ChatAttachment> {
+    const pending = this.preparing.get(id);
+    if (pending) { await pending; return this.prepare(id, transcribe); }
+    const work = this.prepareUnlocked(id, transcribe);
+    this.preparing.set(id, work);
+    try { return await work; } finally { this.preparing.delete(id); }
+  }
+  async attachmentContent(id: string, playback: boolean) {
+    let a = await prisma.chatAttachment.findUniqueOrThrow({where:{id}});
+    // A saved MP3 remains playable even when the original is no longer recoverable.
+    let path = await this.localMediaPath(playback && a.mime.startsWith('audio/') ? a.playbackPath : a.path);
+    if (!path) {
+      a = await this.prepare(id, false);
+      path = playback && a.mime.startsWith('audio/') ? a.playbackPath : a.path;
+    }
+    if (!path) throw new AttachmentUnavailableError();
+    return {bytes:await readFile(path),mime:playback && a.mime.startsWith('audio/') ? 'audio/mpeg' : a.mime,name:a.name};
+  }
+  private async prepareUnlocked(id: string, transcribe: boolean) {
     let a = await prisma.chatAttachment.findUniqueOrThrow({ where: { id } });
+    a = {...a, path:await this.localMediaPath(a.path),playbackPath:await this.localMediaPath(a.playbackPath)};
     if (!a.path && a.providerMediaId) {
-      const info = await this.meta(`${a.providerMediaId}?phone_number_id=${Env.metaWhatsAppPhoneNumberId}`);
+      const info = await this.meta(`${a.providerMediaId}?phone_number_id=${Env.metaWhatsAppPhoneNumberId}`).catch(error=>{
+        if(error.status===404 || error.status===410) throw new AttachmentUnavailableError();
+        throw error;
+      });
       if (Number(info.file_size) > DOCUMENT_LIMIT) throw new Error('El archivo supera 16 MB');
       let url=trustedMediaUrl(info.url);
       let response: Response | undefined;
@@ -217,6 +251,7 @@ export class ChatRuntime {
         }
         break;
       }
+      if(response?.status===404 || response?.status===410) throw new AttachmentUnavailableError();
       if(!response?.ok || !response.body) throw new Error(`No se pudo descargar el archivo desde Meta (HTTP ${response?.status ?? 'desconocido'})`);
       const chunks: Uint8Array[] = []; let size = 0;
       for await (const chunk of response.body as any) { size += chunk.length; if (size > DOCUMENT_LIMIT) throw new Error('El archivo supera 16 MB'); chunks.push(chunk); }
@@ -225,17 +260,21 @@ export class ChatRuntime {
       await mkdir(this.storage,{recursive:true,mode:0o700});
       const path = join(this.storage, a.id);
       await writeFile(path, bytes, { mode: 0o600 });
-      a = await prisma.chatAttachment.update({ where: { id }, data: { path, mime, size, status: 'READY', error: null } });
+      a = await prisma.chatAttachment.update({ where: { id }, data: { path, playbackPath:a.playbackPath, mime, size, status: 'READY', error: null } });
     }
-    if (!a.path) throw new Error('Archivo no disponible');
-    if (a.mime.startsWith('audio/') && a.transcript === null) {
-      const playbackPath = `${a.path}.mp3`;
-      const { stdout } = await execute('ffprobe', ['-v','quiet','-show_entries','format=duration','-of','csv=p=0',a.path], { timeout: 15_000 });
-      if (!Number.isFinite(Number(stdout.trim())) || Number(stdout.trim()) > 600) throw new Error('El audio supera diez minutos o está dañado');
-      await execute('ffmpeg', ['-nostdin','-y','-i',a.path,'-vn','-ac','1','-b:a','64k',playbackPath], { timeout: 60_000 });
-      a=await prisma.chatAttachment.update({where:{id},data:{playbackPath,status:'READY'}});
-      const transcript = await this.ai.audio.transcriptions.create({ model: transcriptionModel(), file: await toFile(await readFile(playbackPath), 'audio.mp3') });
-      a = await prisma.chatAttachment.update({ where: { id }, data: { playbackPath, transcript: transcript.text, status: 'READY', error: null } });
+    if (!a.path) throw new AttachmentUnavailableError();
+    if (a.mime.startsWith('audio/')) {
+      const playbackPath = a.playbackPath ?? `${a.path}.mp3`;
+      if (!a.playbackPath) {
+        const { stdout } = await execute('ffprobe', ['-v','quiet','-show_entries','format=duration','-of','csv=p=0',a.path], { timeout: 15_000 });
+        if (!Number.isFinite(Number(stdout.trim())) || Number(stdout.trim()) > 600) throw new Error('El audio supera diez minutos o está dañado');
+        await execute('ffmpeg', ['-nostdin','-y','-i',a.path,'-vn','-ac','1','-b:a','64k',playbackPath], { timeout: 60_000 });
+        a=await prisma.chatAttachment.update({where:{id},data:{playbackPath,status:'READY'}});
+      }
+      if (transcribe && a.transcript === null) {
+        const transcript = await this.ai.audio.transcriptions.create({ model: transcriptionModel(), file: await toFile(await readFile(playbackPath), 'audio.mp3') });
+        a = await prisma.chatAttachment.update({ where: { id }, data: { playbackPath, transcript: transcript.text, status: 'READY', error: null } });
+      }
     }
     return a;
   }

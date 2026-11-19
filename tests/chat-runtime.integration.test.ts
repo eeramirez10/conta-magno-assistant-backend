@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, readFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const url=process.env.CHAT_TEST_DATABASE_URL;
@@ -64,6 +65,25 @@ test('chat runtime persists moderation, attachments, single-use links and contro
    const received=await prisma.chatAttachment.findFirstOrThrow({where:{providerMediaId:'media-test'}});
    const denied=await fetch(`${base}/api/attachments/${received.id}/content`);assert.equal(denied.status,401);
    const response=await fetch(`${base}/api/attachments/${received.id}/content`,{headers:{Authorization:'Bearer test'}});assert.equal(response.status,200);assert.ok(response.headers.get('content-type')?.includes('application/pdf'));assert.ok((await response.text()).startsWith('%PDF-'));
+   // Persisted development paths must resolve against this server's volume.
+   const source=join(directory,'voice.ogg');
+   execFileSync('ffmpeg',['-loglevel','error','-f','lavfi','-i','anullsrc=channel_layout=mono:sample_rate=16000','-t','0.2','-y',source]);
+   const voiceBytes=await readFile(source);
+   const voice=await prisma.chatAttachment.create({data:{messageId:received.messageId,name:'voice.ogg',mime:'audio/ogg',status:'READY',path:'/Users/other/storage/voice.ogg',playbackPath:'/Users/other/storage/voice.ogg.mp3',transcript:'Transcripción conservada',providerMediaId:'voice-media'}});
+   const voiceUrl=`${base}/api/attachments/${voice.id}/content?playback=1`;
+   const audio=await fetch(voiceUrl,{headers:{Authorization:'Bearer test'}});
+   assert.equal(audio.status,200);assert.ok(audio.headers.get('content-type')?.includes('audio/mpeg'));assert.ok((await audio.arrayBuffer()).byteLength>0);
+   await rm(source);await rm(`${source}.mp3`);
+   const metaBefore=internal.meta;const fetchBefore=globalThis.fetch;
+   internal.meta=async()=>({url:'https://cdn.fbsbx.com/voice.ogg',file_size:voiceBytes.length});
+   globalThis.fetch=async(input:any,init:any)=>String(input)==='https://cdn.fbsbx.com/voice.ogg'?new Response(voiceBytes):fetchBefore(input,init);
+   try{
+    const recovered=await fetch(voiceUrl,{headers:{Authorization:'Bearer test'}});
+    assert.equal(recovered.status,200);assert.ok((await recovered.arrayBuffer()).byteLength>0);
+    assert.equal((await prisma.chatAttachment.findUniqueOrThrow({where:{id:voice.id}})).transcript,'Transcripción conservada');
+   }finally{internal.meta=metaBefore;globalThis.fetch=fetchBefore}
+   const missing=await prisma.chatAttachment.create({data:{messageId:received.messageId,name:'missing.ogg',mime:'audio/ogg',status:'READY',path:'/foreign/missing',transcript:'Conservada'}});
+   assert.equal((await fetch(`${base}/api/attachments/${missing.id}/content?playback=1`,{headers:{Authorization:'Bearer test'}})).status,404);
    blockFails=true;
    const result=await fetch(`${base}/api/conversations/${c.id}/policy`,{method:'POST',headers:{Authorization:'Bearer test','Content-Type':'application/json'},body:JSON.stringify({decision:'BLOCKED'})});assert.equal(result.status,200);assert.equal((await result.json() as any).data.remoteStatus,'FAILED');
   }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()))}

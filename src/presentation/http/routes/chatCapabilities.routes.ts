@@ -1,10 +1,9 @@
 import { uploadFilename } from '../../../infrastructure/chat/mediaSupport.js';
 import { Router } from 'express';
 import multer from 'multer';
-import { readFile } from 'node:fs/promises';
 import rateLimit from 'express-rate-limit';
 import { prisma } from '../../../infrastructure/database/prisma.js';
-import { ChatRuntime, DOCUMENT_LIMIT } from '../../../infrastructure/chat/ChatRuntime.js';
+import { AttachmentUnavailableError, ChatRuntime, DOCUMENT_LIMIT } from '../../../infrastructure/chat/ChatRuntime.js';
 import { requiredAdminAuth } from '../middlewares/requiredAdminAuth.js';
 import type { AuthApplicationService } from '../../../application/services/AuthApplicationService.js';
 
@@ -19,9 +18,8 @@ export function chatCapabilitiesRouter(runtime: ChatRuntime, auth: AuthApplicati
     if (link.mode === 'UPLOAD') {
       res.type('html').send('<!doctype html><html lang="es"><meta name="viewport" content="width=device-width"><title>Enviar archivo a Conta Magno</title><body><h1>Enviar archivo a Conta Magno</h1><p>Imágenes, PDF, Word, Excel, CSV o XML. Máximo 16 MB (imágenes: 5 MB). El enlace permite una entrega.</p><form method="post" enctype="multipart/form-data"><input name="file" type="file" required accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,.csv,.xml,.txt"><button>Enviar archivo</button></form></body></html>'); return;
     }
-    const a = await prisma.chatAttachment.findUniqueOrThrow({ where: { id: link.attachmentId! } });
-    if (!a.path) { res.sendStatus(404); return; }
-    res.attachment(uploadFilename(a.name,a.mime)).type(a.mime).send(await readFile(a.path));
+    const content = await runtime.attachmentContent(link.attachmentId!,false);
+    res.attachment(uploadFilename(content.name,content.mime)).type(content.mime).send(content.bytes);
   }));
   router.post('/chat-files/:token', upload.single('file'), wrap(async(req: any,res: any) => {
     if (!req.file) throw new Error('Selecciona un archivo');
@@ -50,13 +48,17 @@ export function chatCapabilitiesRouter(runtime: ChatRuntime, auth: AuthApplicati
   }));
   router.post('/api/attachments/:id/retry', wrap(async(req:any,res:any)=>res.json(await runtime.retryAttachment(req.params.id))));
   router.get('/api/attachments/:id/content', wrap(async(req: any,res: any) => {
-    const a = await prisma.chatAttachment.findUniqueOrThrow({ where: { id: req.params.id } });
-    const path = req.query.playback && a.playbackPath ? a.playbackPath : a.path;
-    if (!path) { res.sendStatus(404); return; }
-    res.setHeader('Cache-Control','private, no-store'); res.setHeader('X-Content-Type-Options','nosniff');
-    if (!a.mime.startsWith('image/') && !req.query.playback) res.attachment(uploadFilename(a.name,a.mime));
-    res.setHeader('Content-Type', req.query.playback && a.playbackPath ? 'audio/mpeg' : a.mime);
-    res.send(await readFile(path));
+    try {
+      const playback = req.query.playback === '1';
+      const content = await runtime.attachmentContent(req.params.id,playback);
+      res.setHeader('Cache-Control','private, no-store'); res.setHeader('X-Content-Type-Options','nosniff');
+      if (!content.mime.startsWith('image/') && !playback) res.attachment(uploadFilename(content.name,content.mime));
+      res.setHeader('Content-Type',content.mime);
+      res.send(content.bytes);
+    } catch(error) {
+      if(error instanceof AttachmentUnavailableError) {res.status(404).json({ok:false,message:error.message});return;}
+      throw error;
+    }
   }));
   // Guard the existing text route as well; do not let an expired tab send late messages.
   router.post('/api/conversations/:id/messages', (req,res,next) => { void runtime.assertControl(req.params.id, String(req.body.controlSessionId)).then(() => next()).catch(next); });
